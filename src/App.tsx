@@ -5,6 +5,7 @@ import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import Navigation from "@/components/Navigation";
 import Index from "./pages/Index";
+import Characters from "./pages/Characters";
 import Mentor from "./pages/Mentor";
 import Chat from "./pages/Chat";
 import Aptitude from "./pages/Aptitude";
@@ -22,6 +23,7 @@ const App = () => (
         <Navigation />
         <Routes>
           <Route path="/" element={<Index />} />
+          <Route path="/characters" element={<Characters />} />
           <Route path="/mentor" element={<Mentor />} />
           <Route path="/chat" element={<Chat />} />
           <Route path="/aptitude" element={<Aptitude />} />

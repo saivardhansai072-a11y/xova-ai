@@ -4,11 +4,13 @@ export type ChatMessage = { role: "user" | "assistant"; content: string };
 
 export async function streamChat({
   messages,
+  characterPersonality,
   onDelta,
   onDone,
   onError,
 }: {
   messages: ChatMessage[];
+  characterPersonality?: string;
   onDelta: (deltaText: string) => void;
   onDone: () => void;
   onError: (error: string) => void;
@@ -20,7 +22,7 @@ export async function streamChat({
         "Content-Type": "application/json",
         Authorization: `Bearer ${import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY}`,
       },
-      body: JSON.stringify({ messages }),
+      body: JSON.stringify({ messages, characterPersonality }),
     });
 
     if (!resp.ok) {
@@ -70,7 +72,6 @@ export async function streamChat({
       }
     }
 
-    // Final flush
     if (textBuffer.trim()) {
       for (let raw of textBuffer.split("\n")) {
         if (!raw) continue;

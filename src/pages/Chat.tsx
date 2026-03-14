@@ -1,19 +1,26 @@
-import { useState, useRef, useEffect, useCallback } from "react";
+import { useState, useRef, useEffect, useCallback, useMemo } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { Send, Volume2, VolumeX, Trash2 } from "lucide-react";
+import { Send, Volume2, VolumeX, Trash2, Users } from "lucide-react";
 import ReactMarkdown from "react-markdown";
-import MentorAvatar, { MentorState } from "@/components/MentorAvatar";
+import { MentorState } from "@/components/MentorAvatar";
 import { streamChat, ChatMessage } from "@/lib/ai-stream";
+import { getSelectedCharacterId, getCharacterById, AICharacter } from "@/lib/characters";
+import { Link } from "react-router-dom";
 import { toast } from "sonner";
 
 type DisplayMessage = { id: string; role: "user" | "assistant"; content: string };
 
 export default function ChatPage() {
+  const character = useMemo<AICharacter | undefined>(() => {
+    const id = getSelectedCharacterId();
+    return getCharacterById(id);
+  }, []);
+
   const [messages, setMessages] = useState<DisplayMessage[]>([
     {
       id: "welcome",
       role: "assistant",
-      content: "Hello! 👋 I'm **XOVA**, your AI mentor. I can help you learn about any topic — math, science, programming, languages, and more.\n\nWhat would you like to explore today?",
+      content: character?.greeting || "Hello! I'm XOVA. What would you like to learn today?",
     },
   ]);
   const [input, setInput] = useState("");
@@ -49,17 +56,15 @@ export default function ChatPage() {
     setIsStreaming(true);
     setMentorState("listening");
 
-    // Build chat history for API
     const chatHistory: ChatMessage[] = newMessages
-      .filter((m) => m.id !== "welcome" || m.role === "assistant")
       .map((m) => ({ role: m.role, content: m.content }));
 
     let assistantContent = "";
-
     setTimeout(() => setMentorState("thinking"), 400);
 
     await streamChat({
       messages: chatHistory,
+      characterPersonality: character?.personality,
       onDelta: (chunk) => {
         if (mentorState !== "explaining") setMentorState("explaining");
         assistantContent += chunk;
@@ -85,13 +90,11 @@ export default function ChatPage() {
   };
 
   const clearChat = () => {
-    setMessages([
-      {
-        id: "welcome",
-        role: "assistant",
-        content: "Chat cleared! What would you like to learn about?",
-      },
-    ]);
+    setMessages([{
+      id: "welcome",
+      role: "assistant",
+      content: character?.greeting || "Chat cleared! What would you like to learn?",
+    }]);
   };
 
   return (
@@ -99,29 +102,43 @@ export default function ChatPage() {
       {/* Header */}
       <div className="flex items-center justify-between px-4 py-3 border-b border-border bg-card/50 backdrop-blur-md">
         <div className="flex items-center gap-3">
-          <MentorAvatar state={mentorState} size="sm" />
+          {/* Character avatar */}
+          <div className="w-10 h-10 rounded-full overflow-hidden ring-2 ring-primary/30 flex-shrink-0">
+            {character?.image ? (
+              <img src={character.image} alt={character.name} className="w-full h-full object-cover" />
+            ) : (
+              <div className={`w-full h-full bg-gradient-to-br ${character?.color || "from-primary to-accent"} flex items-center justify-center`}>
+                <span className="text-sm font-bold text-foreground">{character?.name?.charAt(0) || "X"}</span>
+              </div>
+            )}
+          </div>
           <div>
-            <h1 className="font-semibold text-foreground text-sm">XOVA AI Mentor</h1>
+            <h1 className="font-semibold text-foreground text-sm">{character?.name || "XOVA"}</h1>
             <p className="text-xs text-muted-foreground capitalize">
-              {isStreaming ? mentorState : "Online"} · Powered by AI
+              {isStreaming ? mentorState : "Online"} · {character?.anime || "AI Mentor"}
             </p>
           </div>
         </div>
         <div className="flex items-center gap-1">
+          <Link
+            to="/characters"
+            className="p-2 rounded-lg hover:bg-secondary text-muted-foreground hover:text-foreground transition-colors"
+            title="Switch character"
+          >
+            <Users className="w-4 h-4" />
+          </Link>
           <button
             onClick={() => {
               setTtsEnabled(!ttsEnabled);
               if (ttsEnabled) window.speechSynthesis?.cancel();
             }}
             className="p-2 rounded-lg hover:bg-secondary text-muted-foreground hover:text-foreground transition-colors"
-            title={ttsEnabled ? "Disable voice" : "Enable voice"}
           >
-            {ttsEnabled ? <Volume2 className="w-5 h-5" /> : <VolumeX className="w-5 h-5" />}
+            {ttsEnabled ? <Volume2 className="w-4 h-4" /> : <VolumeX className="w-4 h-4" />}
           </button>
           <button
             onClick={clearChat}
             className="p-2 rounded-lg hover:bg-secondary text-muted-foreground hover:text-foreground transition-colors"
-            title="Clear chat"
           >
             <Trash2 className="w-4 h-4" />
           </button>
@@ -139,15 +156,26 @@ export default function ChatPage() {
               transition={{ type: "spring", duration: 0.4, bounce: 0 }}
               className={`flex ${msg.role === "user" ? "justify-end" : "justify-start"}`}
             >
+              {msg.role === "assistant" && (
+                <div className="w-7 h-7 rounded-full overflow-hidden mr-2 flex-shrink-0 mt-1">
+                  {character?.image ? (
+                    <img src={character.image} alt="" className="w-full h-full object-cover" />
+                  ) : (
+                    <div className={`w-full h-full bg-gradient-to-br ${character?.color || "from-primary to-accent"} flex items-center justify-center`}>
+                      <span className="text-[10px] font-bold text-foreground">{character?.name?.charAt(0) || "X"}</span>
+                    </div>
+                  )}
+                </div>
+              )}
               <div
-                className={`max-w-[85%] md:max-w-[70%] px-4 py-3 rounded-2xl text-sm leading-relaxed ${
+                className={`max-w-[80%] md:max-w-[65%] px-4 py-3 rounded-2xl text-sm leading-relaxed ${
                   msg.role === "user"
                     ? "bg-primary text-primary-foreground rounded-br-md"
                     : "surface-card text-card-foreground rounded-bl-md"
                 }`}
               >
                 {msg.role === "assistant" ? (
-                  <div className="prose prose-sm prose-invert max-w-none [&>p]:mb-2 [&>ul]:mb-2 [&>ol]:mb-2 [&>h1]:text-foreground [&>h2]:text-foreground [&>h3]:text-foreground [&_strong]:text-foreground [&_code]:bg-secondary [&_code]:px-1 [&_code]:rounded [&_pre]:bg-secondary [&_pre]:p-3 [&_pre]:rounded-lg">
+                  <div className="prose prose-sm prose-invert max-w-none [&>p]:mb-2 [&>ul]:mb-2 [&>ol]:mb-2 [&_strong]:text-foreground [&_code]:bg-secondary [&_code]:px-1 [&_code]:rounded [&_pre]:bg-secondary [&_pre]:p-3 [&_pre]:rounded-lg">
                     <ReactMarkdown>{msg.content}</ReactMarkdown>
                   </div>
                 ) : (
@@ -160,6 +188,7 @@ export default function ChatPage() {
 
         {isStreaming && mentorState === "thinking" && (
           <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="flex justify-start">
+            <div className="w-7 h-7 mr-2 flex-shrink-0" />
             <div className="surface-card px-4 py-3 rounded-2xl rounded-bl-md flex gap-1">
               {[0, 1, 2].map((i) => (
                 <motion.div
@@ -180,7 +209,7 @@ export default function ChatPage() {
           <input
             value={input}
             onChange={(e) => setInput(e.target.value)}
-            placeholder="Ask XOVA anything..."
+            placeholder={`Ask ${character?.name || "XOVA"} anything...`}
             disabled={isStreaming}
             className="flex-1 bg-secondary rounded-xl px-4 py-3 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 transition-all disabled:opacity-50"
           />
