@@ -9,9 +9,30 @@ serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
 
   try {
-    const { messages } = await req.json();
+    const { messages, characterPersonality } = await req.json();
     const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
     if (!LOVABLE_API_KEY) throw new Error("LOVABLE_API_KEY is not configured");
+
+    const systemPrompt = characterPersonality
+      ? `${characterPersonality}
+
+Additionally, you are an AI mentor on the XOVA platform. Your job is to help students learn. You:
+- Explain concepts step by step in simple language
+- Use analogies and real-world examples
+- Celebrate student successes with enthusiasm
+- Encourage students when they struggle
+- Ask follow-up questions to check understanding
+- Adapt your explanations based on the student's level
+- Use markdown formatting for clarity (headers, bold, lists, code blocks)
+- Stay in character at all times while being educational
+
+Always be supportive, clear, and engaging. Keep responses concise but thorough.`
+      : `You are XOVA, an AI mentor that behaves like a human tutor. You are warm, patient, encouraging, and knowledgeable.
+- Explain concepts step by step
+- Use analogies and real-world examples
+- Celebrate successes, encourage struggles
+- Use markdown formatting
+- Be supportive, clear, engaging, and concise`;
 
     const response = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
       method: "POST",
@@ -22,21 +43,7 @@ serve(async (req) => {
       body: JSON.stringify({
         model: "google/gemini-3-flash-preview",
         messages: [
-          {
-            role: "system",
-            content: `You are XOVA, an AI mentor that behaves like a human tutor. You are warm, patient, encouraging, and knowledgeable across many subjects including math, science, programming, language, and general knowledge.
-
-Your personality traits:
-- You explain concepts step by step in simple language
-- You use analogies and real-world examples
-- You celebrate student successes with enthusiasm
-- You encourage students when they struggle
-- You ask follow-up questions to check understanding
-- You adapt your explanations based on the student's level
-- You use markdown formatting for clarity (headers, bold, lists, code blocks)
-
-Always be supportive, clear, and engaging. Keep responses concise but thorough.`,
-          },
+          { role: "system", content: systemPrompt },
           ...messages,
         ],
         stream: true,
@@ -45,22 +52,19 @@ Always be supportive, clear, and engaging. Keep responses concise but thorough.`
 
     if (!response.ok) {
       if (response.status === 429) {
-        return new Response(JSON.stringify({ error: "Rate limit exceeded. Please wait a moment and try again." }), {
-          status: 429,
-          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        return new Response(JSON.stringify({ error: "Rate limit exceeded. Please wait a moment." }), {
+          status: 429, headers: { ...corsHeaders, "Content-Type": "application/json" },
         });
       }
       if (response.status === 402) {
-        return new Response(JSON.stringify({ error: "Usage limit reached. Please add credits to continue." }), {
-          status: 402,
-          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        return new Response(JSON.stringify({ error: "Usage limit reached. Please add credits." }), {
+          status: 402, headers: { ...corsHeaders, "Content-Type": "application/json" },
         });
       }
       const t = await response.text();
       console.error("AI gateway error:", response.status, t);
       return new Response(JSON.stringify({ error: "AI service temporarily unavailable." }), {
-        status: 500,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
+        status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
 
@@ -70,8 +74,7 @@ Always be supportive, clear, and engaging. Keep responses concise but thorough.`
   } catch (e) {
     console.error("chat error:", e);
     return new Response(JSON.stringify({ error: e instanceof Error ? e.message : "Unknown error" }), {
-      status: 500,
-      headers: { ...corsHeaders, "Content-Type": "application/json" },
+      status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
   }
 });
