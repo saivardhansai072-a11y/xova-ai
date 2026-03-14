@@ -1,16 +1,19 @@
 const CHAT_URL = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/chat`;
+const TTS_URL = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/tts`;
 
 export type ChatMessage = { role: "user" | "assistant"; content: string };
 
 export async function streamChat({
   messages,
   characterPersonality,
+  mode,
   onDelta,
   onDone,
   onError,
 }: {
   messages: ChatMessage[];
   characterPersonality?: string;
+  mode?: "interview" | "career" | "startup";
   onDelta: (deltaText: string) => void;
   onDone: () => void;
   onError: (error: string) => void;
@@ -22,7 +25,7 @@ export async function streamChat({
         "Content-Type": "application/json",
         Authorization: `Bearer ${import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY}`,
       },
-      body: JSON.stringify({ messages, characterPersonality }),
+      body: JSON.stringify({ messages, characterPersonality, mode }),
     });
 
     if (!resp.ok) {
@@ -92,4 +95,41 @@ export async function streamChat({
   } catch (e) {
     onError(e instanceof Error ? e.message : "Connection failed");
   }
+}
+
+export async function speakWithElevenLabs(text: string, voiceId?: string): Promise<void> {
+  try {
+    const response = await fetch(TTS_URL, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        apikey: import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY,
+        Authorization: `Bearer ${import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY}`,
+      },
+      body: JSON.stringify({ text: text.slice(0, 500), voiceId }),
+    });
+
+    if (!response.ok) {
+      console.warn("TTS failed, falling back to browser TTS");
+      browserSpeak(text);
+      return;
+    }
+
+    const audioBlob = await response.blob();
+    const audioUrl = URL.createObjectURL(audioBlob);
+    const audio = new Audio(audioUrl);
+    await audio.play();
+  } catch {
+    browserSpeak(text);
+  }
+}
+
+export function browserSpeak(text: string) {
+  if (!("speechSynthesis" in window)) return;
+  window.speechSynthesis.cancel();
+  const clean = text.replace(/[#*`_~\[\]()>]/g, "");
+  const u = new SpeechSynthesisUtterance(clean);
+  u.rate = 0.95;
+  u.pitch = 1.05;
+  window.speechSynthesis.speak(u);
 }

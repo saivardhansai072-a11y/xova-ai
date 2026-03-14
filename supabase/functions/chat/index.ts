@@ -9,12 +9,40 @@ serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
 
   try {
-    const { messages, characterPersonality } = await req.json();
-    const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
-    if (!LOVABLE_API_KEY) throw new Error("LOVABLE_API_KEY is not configured");
+    const { messages, characterPersonality, mode } = await req.json();
+    const GROQ_API_KEY = Deno.env.get("GROQ_API_KEY");
+    if (!GROQ_API_KEY) throw new Error("GROQ_API_KEY is not configured");
 
-    const systemPrompt = characterPersonality
-      ? `${characterPersonality}
+    let systemPrompt = "";
+
+    if (mode === "interview") {
+      systemPrompt = `You are an expert interview coach on the XOVA platform. You:
+- Ask realistic HR, technical, and behavioral interview questions
+- Evaluate answers and provide constructive feedback
+- Rate answers on a scale of 1-10
+- Suggest improvements with example answers
+- Cover different interview types: HR, technical, startup, behavioral
+- Use markdown formatting for clarity
+- Be encouraging but honest about areas for improvement`;
+    } else if (mode === "career") {
+      systemPrompt = `You are a career guidance counselor on the XOVA platform. You:
+- Help students discover career paths based on their interests and skills
+- Provide detailed roadmaps for different careers (data science, web dev, AI, etc.)
+- Suggest relevant skills, courses, and certifications
+- Share industry insights and salary expectations
+- Help with resume and portfolio advice
+- Use markdown formatting with clear sections and lists`;
+    } else if (mode === "startup") {
+      systemPrompt = `You are a startup mentor on the XOVA platform. You:
+- Help validate startup ideas
+- Guide on business model creation
+- Advise on MVP development
+- Teach about funding, pitching, and growth strategies
+- Share real-world startup examples and lessons
+- Help with market analysis and competitor research
+- Use markdown formatting for clarity`;
+    } else if (characterPersonality) {
+      systemPrompt = `${characterPersonality}
 
 Additionally, you are an AI mentor on the XOVA platform. Your job is to help students learn. You:
 - Explain concepts step by step in simple language
@@ -25,28 +53,34 @@ Additionally, you are an AI mentor on the XOVA platform. Your job is to help stu
 - Adapt your explanations based on the student's level
 - Use markdown formatting for clarity (headers, bold, lists, code blocks)
 - Stay in character at all times while being educational
+- Support personal conversations — if a student says they're stressed, lonely, or emotional, respond with empathy and encouragement
 
-Always be supportive, clear, and engaging. Keep responses concise but thorough.`
-      : `You are XOVA, an AI mentor that behaves like a human tutor. You are warm, patient, encouraging, and knowledgeable.
+Always be supportive, clear, and engaging. Keep responses concise but thorough.`;
+    } else {
+      systemPrompt = `You are XOVA, an AI mentor that behaves like a human tutor. You are warm, patient, encouraging, and knowledgeable.
 - Explain concepts step by step
 - Use analogies and real-world examples
 - Celebrate successes, encourage struggles
 - Use markdown formatting
-- Be supportive, clear, engaging, and concise`;
+- Be supportive, clear, engaging, and concise
+- Support personal conversations with empathy`;
+    }
 
-    const response = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
+    const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
       method: "POST",
       headers: {
-        Authorization: `Bearer ${LOVABLE_API_KEY}`,
+        Authorization: `Bearer ${GROQ_API_KEY}`,
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        model: "google/gemini-3-flash-preview",
+        model: "llama-3.3-70b-versatile",
         messages: [
           { role: "system", content: systemPrompt },
           ...messages,
         ],
         stream: true,
+        temperature: 0.7,
+        max_tokens: 2048,
       }),
     });
 
@@ -56,13 +90,8 @@ Always be supportive, clear, and engaging. Keep responses concise but thorough.`
           status: 429, headers: { ...corsHeaders, "Content-Type": "application/json" },
         });
       }
-      if (response.status === 402) {
-        return new Response(JSON.stringify({ error: "Usage limit reached. Please add credits." }), {
-          status: 402, headers: { ...corsHeaders, "Content-Type": "application/json" },
-        });
-      }
       const t = await response.text();
-      console.error("AI gateway error:", response.status, t);
+      console.error("Groq API error:", response.status, t);
       return new Response(JSON.stringify({ error: "AI service temporarily unavailable." }), {
         status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
