@@ -34,8 +34,12 @@ export default function DashboardPage() {
     const saved = localStorage.getItem("xova-progress");
     if (saved) {
       const progress = JSON.parse(saved);
-      const total = Object.values(progress).reduce((a: number, b: any) => a + (b.total as number), 0);
-      const correct = Object.values(progress).reduce((a: number, b: any) => a + (b.correct as number), 0);
+      let total = 0;
+      let correct = 0;
+      for (const v of Object.values(progress)) {
+        total += (v as any).total;
+        correct += (v as any).correct;
+      }
       setTotalQuestions(total);
       setAccuracy(total > 0 ? Math.round((correct / total) * 100) : 0);
     }
