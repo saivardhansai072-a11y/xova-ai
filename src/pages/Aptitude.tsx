@@ -1,11 +1,11 @@
 import { useState, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { CheckCircle2, XCircle, ArrowRight, RotateCcw, Trophy, ChevronLeft, Search, BookOpen, TrendingUp } from "lucide-react";
-import { aptitudeTopics, AptitudeTopic, AptitudeSubtopic, AptitudeQuestion, totalTopicCount, totalQuestionCount } from "@/lib/aptitude-data";
-
-type Progress = Record<string, { total: number; correct: number }>;
+import { CheckCircle2, XCircle, ArrowRight, RotateCcw, Trophy, ChevronLeft, Search, BookOpen } from "lucide-react";
+import { aptitudeTopics, AptitudeTopic, AptitudeSubtopic } from "@/lib/aptitude-data";
+import { useQuizProgress } from "@/hooks/useQuizProgress";
 
 export default function AptitudePage() {
+  const { progress, saveProgress, loaded } = useQuizProgress();
   const [selectedTopic, setSelectedTopic] = useState<AptitudeTopic | null>(null);
   const [selectedSub, setSelectedSub] = useState<AptitudeSubtopic | null>(null);
   const [currentQ, setCurrentQ] = useState(0);
@@ -14,28 +14,9 @@ export default function AptitudePage() {
   const [answered, setAnswered] = useState(false);
   const [finished, setFinished] = useState(false);
   const [search, setSearch] = useState("");
-  const [progress, setProgress] = useState<Progress>(() => {
-    const saved = localStorage.getItem("xova-apt-progress");
-    return saved ? JSON.parse(saved) : {};
-  });
 
   const questions = selectedSub?.questions || [];
   const q = questions[currentQ];
-
-  const saveProgress = (key: string, correct: boolean) => {
-    setProgress((prev) => {
-      const p = prev[key] || { total: 0, correct: 0 };
-      const updated = { ...prev, [key]: { total: p.total + 1, correct: p.correct + (correct ? 1 : 0) } };
-      localStorage.setItem("xova-apt-progress", JSON.stringify(updated));
-      // Also update legacy progress for dashboard
-      const legacy = JSON.parse(localStorage.getItem("xova-progress") || "{}");
-      const cat = selectedTopic?.id || "general";
-      const lp = legacy[cat] || { total: 0, correct: 0, attempted: [] };
-      legacy[cat] = { total: lp.total + 1, correct: lp.correct + (correct ? 1 : 0), attempted: [...lp.attempted] };
-      localStorage.setItem("xova-progress", JSON.stringify(legacy));
-      return updated;
-    });
-  };
 
   const handleSelect = (idx: number) => {
     if (answered) return;
@@ -43,7 +24,9 @@ export default function AptitudePage() {
     setAnswered(true);
     const isCorrect = idx === q.correct;
     if (isCorrect) setScore((s) => s + 1);
-    saveProgress(`${selectedTopic?.id}-${selectedSub?.id}`, isCorrect);
+    if (selectedTopic && selectedSub) {
+      saveProgress(selectedTopic.id, selectedSub.id, isCorrect);
+    }
   };
 
   const handleNext = () => {
@@ -57,14 +40,12 @@ export default function AptitudePage() {
   };
 
   const autoAdvance = () => {
-    // Find next subtopic in current topic, or next topic
     if (selectedTopic) {
       const subIdx = selectedTopic.subtopics.indexOf(selectedSub!);
       if (subIdx < selectedTopic.subtopics.length - 1) {
         startSubtopic(selectedTopic.subtopics[subIdx + 1]);
         return;
       }
-      // Find next topic
       const topicIdx = aptitudeTopics.indexOf(selectedTopic);
       if (topicIdx < aptitudeTopics.length - 1) {
         const nextTopic = aptitudeTopics[topicIdx + 1];
@@ -73,7 +54,6 @@ export default function AptitudePage() {
         return;
       }
     }
-    // Back to topics
     goBack();
   };
 
@@ -107,17 +87,15 @@ export default function AptitudePage() {
   const totalCorrect = Object.values(progress).reduce((a, p) => a + p.correct, 0);
   const overallAcc = totalAttempted > 0 ? Math.round((totalCorrect / totalAttempted) * 100) : 0;
 
-  // Topic selection
   if (!selectedTopic) {
     return (
       <div className="min-h-screen px-4 pb-24 md:pt-20 pt-8">
         <div className="max-w-4xl mx-auto">
           <h1 className="text-2xl font-bold text-foreground mb-1">Aptitude Training</h1>
           <p className="text-sm text-muted-foreground mb-4">
-            {totalTopicCount} topics · {totalQuestionCount}+ questions
+            {aptitudeTopics.length} topics · Practice & improve
           </p>
 
-          {/* Stats bar */}
           <div className="grid grid-cols-3 gap-3 mb-6">
             <div className="surface-card p-3 text-center">
               <div className="text-lg font-bold text-foreground">{totalAttempted}</div>
@@ -133,7 +111,6 @@ export default function AptitudePage() {
             </div>
           </div>
 
-          {/* Search */}
           <div className="relative mb-6">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
             <input
@@ -144,7 +121,6 @@ export default function AptitudePage() {
             />
           </div>
 
-          {/* Topics grid */}
           <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
             {filteredTopics.map((topic, i) => {
               const key = topic.id;
@@ -165,9 +141,7 @@ export default function AptitudePage() {
                 >
                   <div className="text-2xl mb-2">{topic.icon}</div>
                   <h3 className="text-sm font-semibold text-foreground leading-tight">{topic.name}</h3>
-                  <p className="text-[10px] text-muted-foreground mt-1">
-                    {totalQ} Qs · {topic.subtopics.length} sets
-                  </p>
+                  <p className="text-[10px] text-muted-foreground mt-1">{totalQ} Qs · {topic.subtopics.length} sets</p>
                   {p.total > 0 && (
                     <div className="mt-2">
                       <div className="w-full h-1 bg-secondary rounded-full">
@@ -185,7 +159,6 @@ export default function AptitudePage() {
     );
   }
 
-  // Subtopic selection
   if (!selectedSub) {
     return (
       <div className="min-h-screen px-4 pb-24 md:pt-20 pt-8">
@@ -200,7 +173,6 @@ export default function AptitudePage() {
               <p className="text-sm text-muted-foreground">{selectedTopic.subtopics.length} question sets</p>
             </div>
           </div>
-
           <div className="space-y-3">
             {selectedTopic.subtopics.map((sub, i) => {
               const key = `${selectedTopic.id}-${sub.id}`;
@@ -238,7 +210,6 @@ export default function AptitudePage() {
     );
   }
 
-  // Results
   if (finished) {
     const pct = Math.round((score / questions.length) * 100);
     return (
@@ -267,14 +238,12 @@ export default function AptitudePage() {
     );
   }
 
-  // Quiz
   return (
     <div className="min-h-screen px-4 pb-24 md:pt-20 pt-8">
       <div className="max-w-2xl mx-auto">
         <button onClick={goBack} className="text-sm text-muted-foreground hover:text-foreground mb-4 flex items-center gap-1">
           <ChevronLeft className="w-4 h-4" /> {selectedTopic.name}
         </button>
-
         <div className="flex items-center justify-between mb-4">
           <span className="text-sm text-muted-foreground">{selectedSub.name} · Q{currentQ + 1}/{questions.length}</span>
           <span className="text-sm font-medium text-primary">Score: {score}</span>
@@ -282,7 +251,6 @@ export default function AptitudePage() {
         <div className="w-full h-1.5 bg-secondary rounded-full mb-6">
           <motion.div className="h-full bg-primary rounded-full" animate={{ width: `${((currentQ + 1) / questions.length) * 100}%` }} />
         </div>
-
         <AnimatePresence mode="wait">
           <motion.div key={q.id} initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }}>
             <h2 className="text-lg font-semibold text-foreground mb-5">{q.question}</h2>

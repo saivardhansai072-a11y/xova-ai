@@ -7,6 +7,7 @@ import { streamChat, ChatMessage } from "@/lib/ai-stream";
 import { getSelectedCharacterId, getCharacterById, AICharacter } from "@/lib/characters";
 import { Link } from "react-router-dom";
 import { toast } from "sonner";
+import { useChatHistory } from "@/hooks/useChatHistory";
 
 type DisplayMessage = { id: string; role: "user" | "assistant"; content: string };
 
@@ -16,18 +17,29 @@ export default function ChatPage() {
     return getCharacterById(id);
   }, []);
 
-  const [messages, setMessages] = useState<DisplayMessage[]>([
-    {
-      id: "welcome",
-      role: "assistant",
-      content: character?.greeting || "Hello! I'm XOVA. What would you like to learn today?",
-    },
-  ]);
+  const characterId = character?.id || "naruto";
+  const { messages: savedMessages, saveMessage, clearHistory, loaded } = useChatHistory(characterId, "chat");
+
+  const [messages, setMessages] = useState<DisplayMessage[]>([]);
   const [input, setInput] = useState("");
   const [mentorState, setMentorState] = useState<MentorState>("idle");
   const [isStreaming, setIsStreaming] = useState(false);
   const [ttsEnabled, setTtsEnabled] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
+
+  // Load saved messages or show greeting
+  useEffect(() => {
+    if (!loaded) return;
+    if (savedMessages.length > 0) {
+      setMessages(savedMessages);
+    } else {
+      setMessages([{
+        id: "welcome",
+        role: "assistant",
+        content: character?.greeting || "Hello! I'm XOVA. What would you like to learn today?",
+      }]);
+    }
+  }, [loaded, savedMessages.length]);
 
   const scrollToBottom = useCallback(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" });
@@ -56,6 +68,9 @@ export default function ChatPage() {
     setIsStreaming(true);
     setMentorState("listening");
 
+    // Save user message to DB
+    saveMessage("user", userMsg.content);
+
     const chatHistory: ChatMessage[] = newMessages
       .map((m) => ({ role: m.role, content: m.content }));
 
@@ -79,7 +94,10 @@ export default function ChatPage() {
       onDone: () => {
         setIsStreaming(false);
         setMentorState("idle");
-        if (assistantContent) speak(assistantContent);
+        if (assistantContent) {
+          speak(assistantContent);
+          saveMessage("assistant", assistantContent);
+        }
       },
       onError: (error) => {
         setIsStreaming(false);
@@ -89,7 +107,8 @@ export default function ChatPage() {
     });
   };
 
-  const clearChat = () => {
+  const clearChat = async () => {
+    await clearHistory();
     setMessages([{
       id: "welcome",
       role: "assistant",
@@ -102,7 +121,6 @@ export default function ChatPage() {
       {/* Header */}
       <div className="flex items-center justify-between px-4 py-3 border-b border-border bg-card/50 backdrop-blur-md">
         <div className="flex items-center gap-3">
-          {/* Character avatar */}
           <div className="w-10 h-10 rounded-full overflow-hidden ring-2 ring-primary/30 flex-shrink-0">
             {character?.image ? (
               <img src={character.image} alt={character.name} className="w-full h-full object-cover" />
@@ -120,26 +138,13 @@ export default function ChatPage() {
           </div>
         </div>
         <div className="flex items-center gap-1">
-          <Link
-            to="/characters"
-            className="p-2 rounded-lg hover:bg-secondary text-muted-foreground hover:text-foreground transition-colors"
-            title="Switch character"
-          >
+          <Link to="/characters" className="p-2 rounded-lg hover:bg-secondary text-muted-foreground hover:text-foreground transition-colors" title="Switch character">
             <Users className="w-4 h-4" />
           </Link>
-          <button
-            onClick={() => {
-              setTtsEnabled(!ttsEnabled);
-              if (ttsEnabled) window.speechSynthesis?.cancel();
-            }}
-            className="p-2 rounded-lg hover:bg-secondary text-muted-foreground hover:text-foreground transition-colors"
-          >
+          <button onClick={() => { setTtsEnabled(!ttsEnabled); if (ttsEnabled) window.speechSynthesis?.cancel(); }} className="p-2 rounded-lg hover:bg-secondary text-muted-foreground hover:text-foreground transition-colors">
             {ttsEnabled ? <Volume2 className="w-4 h-4" /> : <VolumeX className="w-4 h-4" />}
           </button>
-          <button
-            onClick={clearChat}
-            className="p-2 rounded-lg hover:bg-secondary text-muted-foreground hover:text-foreground transition-colors"
-          >
+          <button onClick={clearChat} className="p-2 rounded-lg hover:bg-secondary text-muted-foreground hover:text-foreground transition-colors">
             <Trash2 className="w-4 h-4" />
           </button>
         </div>
@@ -167,20 +172,16 @@ export default function ChatPage() {
                   )}
                 </div>
               )}
-              <div
-                className={`max-w-[80%] md:max-w-[65%] px-4 py-3 rounded-2xl text-sm leading-relaxed ${
-                  msg.role === "user"
-                    ? "bg-primary text-primary-foreground rounded-br-md"
-                    : "surface-card text-card-foreground rounded-bl-md"
-                }`}
-              >
+              <div className={`max-w-[80%] md:max-w-[65%] px-4 py-3 rounded-2xl text-sm leading-relaxed ${
+                msg.role === "user"
+                  ? "bg-primary text-primary-foreground rounded-br-md"
+                  : "surface-card text-card-foreground rounded-bl-md"
+              }`}>
                 {msg.role === "assistant" ? (
                   <div className="prose prose-sm prose-invert max-w-none [&>p]:mb-2 [&>ul]:mb-2 [&>ol]:mb-2 [&_strong]:text-foreground [&_code]:bg-secondary [&_code]:px-1 [&_code]:rounded [&_pre]:bg-secondary [&_pre]:p-3 [&_pre]:rounded-lg">
                     <ReactMarkdown>{msg.content}</ReactMarkdown>
                   </div>
-                ) : (
-                  msg.content
-                )}
+                ) : msg.content}
               </div>
             </motion.div>
           ))}
@@ -191,12 +192,7 @@ export default function ChatPage() {
             <div className="w-7 h-7 mr-2 flex-shrink-0" />
             <div className="surface-card px-4 py-3 rounded-2xl rounded-bl-md flex gap-1">
               {[0, 1, 2].map((i) => (
-                <motion.div
-                  key={i}
-                  className="w-2 h-2 rounded-full bg-muted-foreground"
-                  animate={{ y: [0, -6, 0] }}
-                  transition={{ duration: 0.6, repeat: Infinity, delay: i * 0.15 }}
-                />
+                <motion.div key={i} className="w-2 h-2 rounded-full bg-muted-foreground" animate={{ y: [0, -6, 0] }} transition={{ duration: 0.6, repeat: Infinity, delay: i * 0.15 }} />
               ))}
             </div>
           </motion.div>
@@ -213,11 +209,7 @@ export default function ChatPage() {
             disabled={isStreaming}
             className="flex-1 bg-secondary rounded-xl px-4 py-3 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 transition-all disabled:opacity-50"
           />
-          <button
-            type="submit"
-            disabled={!input.trim() || isStreaming}
-            className="p-3 rounded-xl bg-primary text-primary-foreground hover:opacity-90 transition-opacity disabled:opacity-40"
-          >
+          <button type="submit" disabled={!input.trim() || isStreaming} className="p-3 rounded-xl bg-primary text-primary-foreground hover:opacity-90 transition-opacity disabled:opacity-40">
             <Send className="w-4 h-4" />
           </button>
         </div>
