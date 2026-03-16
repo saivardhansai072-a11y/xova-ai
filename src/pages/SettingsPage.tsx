@@ -1,6 +1,8 @@
 import { useState } from "react";
 import { motion } from "framer-motion";
-import { Volume2, Zap, Palette, Info } from "lucide-react";
+import { Volume2, Zap, Palette, Info, LogOut } from "lucide-react";
+import { useAuth } from "@/contexts/AuthContext";
+import { useProfile } from "@/hooks/useProfile";
 
 interface SettingToggleProps {
   label: string;
@@ -37,6 +39,8 @@ function SettingToggle({ label, description, icon: Icon, checked, onChange }: Se
 }
 
 export default function SettingsPage() {
+  const { user, signOut } = useAuth();
+  const { profile } = useProfile();
   const [voiceEnabled, setVoiceEnabled] = useState(true);
   const [animations, setAnimations] = useState(true);
   const [highContrast, setHighContrast] = useState(false);
@@ -46,29 +50,41 @@ export default function SettingsPage() {
       <div className="max-w-lg mx-auto">
         <h1 className="text-2xl font-bold text-foreground mb-6">Settings</h1>
 
-        <div className="space-y-3">
-          <SettingToggle
-            label="Voice Responses"
-            description="Enable text-to-speech for mentor responses"
-            icon={Volume2}
-            checked={voiceEnabled}
-            onChange={setVoiceEnabled}
-          />
-          <SettingToggle
-            label="Animations"
-            description="Enable mentor avatar animations"
-            icon={Zap}
-            checked={animations}
-            onChange={setAnimations}
-          />
-          <SettingToggle
-            label="High Contrast"
-            description="Increase visual contrast for accessibility"
-            icon={Palette}
-            checked={highContrast}
-            onChange={setHighContrast}
-          />
+        {/* Profile section */}
+        <div className="surface-card p-4 flex items-center gap-3 mb-6">
+          <div className="w-12 h-12 rounded-full bg-gradient-to-br from-primary to-accent flex items-center justify-center overflow-hidden">
+            {profile?.avatar_url ? (
+              <img src={profile.avatar_url} alt="" className="w-full h-full object-cover" />
+            ) : (
+              <span className="text-lg font-bold text-primary-foreground">
+                {(profile?.display_name || user?.email || "U").charAt(0).toUpperCase()}
+              </span>
+            )}
+          </div>
+          <div className="flex-1">
+            <h3 className="text-sm font-medium text-foreground">{profile?.display_name || "User"}</h3>
+            <p className="text-xs text-muted-foreground">{user?.email}</p>
+          </div>
         </div>
+
+        <div className="space-y-3">
+          <SettingToggle label="Voice Responses" description="Enable text-to-speech for mentor responses" icon={Volume2} checked={voiceEnabled} onChange={setVoiceEnabled} />
+          <SettingToggle label="Animations" description="Enable mentor avatar animations" icon={Zap} checked={animations} onChange={setAnimations} />
+          <SettingToggle label="High Contrast" description="Increase visual contrast for accessibility" icon={Palette} checked={highContrast} onChange={setHighContrast} />
+        </div>
+
+        <button
+          onClick={signOut}
+          className="w-full mt-6 surface-card p-4 flex items-center gap-3 hover:border-destructive/30 transition-colors"
+        >
+          <div className="w-10 h-10 rounded-lg bg-destructive/10 flex items-center justify-center">
+            <LogOut className="w-5 h-5 text-destructive" />
+          </div>
+          <div>
+            <h3 className="text-sm font-medium text-foreground">Sign Out</h3>
+            <p className="text-xs text-muted-foreground">Log out of your account</p>
+          </div>
+        </button>
 
         <div className="mt-8 surface-card p-5">
           <div className="flex items-center gap-2 mb-3">
@@ -80,7 +96,7 @@ export default function SettingsPage() {
             and animated interactions to create a personalized educational experience.
           </p>
           <div className="mt-4 flex gap-4 text-xs text-muted-foreground">
-            <span>Version 1.0.0</span>
+            <span>Version 2.0.0</span>
             <span>•</span>
             <span>Built with ❤️</span>
           </div>
