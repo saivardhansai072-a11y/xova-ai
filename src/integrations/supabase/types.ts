@@ -14,7 +14,99 @@ export type Database = {
   }
   public: {
     Tables: {
-      [_ in never]: never
+      chat_history: {
+        Row: {
+          character_id: string
+          content: string
+          created_at: string
+          id: string
+          mode: string | null
+          role: string
+          user_id: string
+        }
+        Insert: {
+          character_id?: string
+          content: string
+          created_at?: string
+          id?: string
+          mode?: string | null
+          role: string
+          user_id: string
+        }
+        Update: {
+          character_id?: string
+          content?: string
+          created_at?: string
+          id?: string
+          mode?: string | null
+          role?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
+      profiles: {
+        Row: {
+          avatar_url: string | null
+          created_at: string
+          display_name: string | null
+          id: string
+          last_visit: string | null
+          selected_character: string | null
+          streak: number | null
+          updated_at: string
+        }
+        Insert: {
+          avatar_url?: string | null
+          created_at?: string
+          display_name?: string | null
+          id: string
+          last_visit?: string | null
+          selected_character?: string | null
+          streak?: number | null
+          updated_at?: string
+        }
+        Update: {
+          avatar_url?: string | null
+          created_at?: string
+          display_name?: string | null
+          id?: string
+          last_visit?: string | null
+          selected_character?: string | null
+          streak?: number | null
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      quiz_progress: {
+        Row: {
+          id: string
+          subtopic_id: string
+          topic_id: string
+          total_attempted: number | null
+          total_correct: number | null
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          id?: string
+          subtopic_id: string
+          topic_id: string
+          total_attempted?: number | null
+          total_correct?: number | null
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          id?: string
+          subtopic_id?: string
+          topic_id?: string
+          total_attempted?: number | null
+          total_correct?: number | null
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
     }
     Views: {
       [_ in never]: never
