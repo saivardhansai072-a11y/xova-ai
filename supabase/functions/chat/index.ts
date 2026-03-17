@@ -5,13 +5,26 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
 };
 
+type IncomingMessage = {
+  role: "user" | "assistant";
+  content: string;
+};
+
 serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
 
   try {
-    const { messages, characterPersonality, mode } = await req.json();
+    const { messages, characterPersonality, mode, cameraFrame } = await req.json() as {
+      messages: IncomingMessage[];
+      characterPersonality?: string;
+      mode?: string;
+      cameraFrame?: string;
+    };
+
     const GROQ_API_KEY = Deno.env.get("GROQ_API_KEY");
-    if (!GROQ_API_KEY) throw new Error("GROQ_API_KEY is not configured");
+    const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
+
+    const hasCameraFrame = typeof cameraFrame === "string" && cameraFrame.startsWith("data:image");
 
     let systemPrompt = "";
 
@@ -23,7 +36,8 @@ serve(async (req) => {
 - Suggest improvements with example answers
 - Cover different interview types: HR, technical, startup, behavioral
 - Use markdown formatting for clarity
-- Be encouraging but honest about areas for improvement`;
+- Be encouraging but honest about areas for improvement
+${hasCameraFrame ? "- Use the camera snapshot to provide delivery feedback (confidence, posture, eye contact, professionalism)" : ""}`;
     } else if (mode === "career") {
       systemPrompt = `You are a career guidance counselor on the XOVA platform. You:
 - Help students discover career paths based on their interests and skills
@@ -66,34 +80,78 @@ Always be supportive, clear, and engaging. Keep responses concise but thorough.`
 - Support personal conversations with empathy`;
     }
 
-    const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${GROQ_API_KEY}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        model: "llama-3.3-70b-versatile",
-        messages: [
-          { role: "system", content: systemPrompt },
-          ...messages,
-        ],
-        stream: true,
-        temperature: 0.7,
-        max_tokens: 2048,
-      }),
-    });
+    let response: Response;
+
+    if (mode === "interview" && hasCameraFrame && LOVABLE_API_KEY) {
+      const gatewayMessages = messages.map((msg, index) => {
+        if (index === messages.length - 1 && msg.role === "user") {
+          return {
+            role: "user",
+            content: [
+              { type: "text", text: msg.content },
+              { type: "image_url", image_url: { url: cameraFrame } },
+            ],
+          };
+        }
+
+        return {
+          role: msg.role,
+          content: msg.content,
+        };
+      });
+
+      response = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${LOVABLE_API_KEY}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          model: "google/gemini-2.5-flash",
+          messages: [
+            { role: "system", content: systemPrompt },
+            ...gatewayMessages,
+          ],
+          stream: true,
+          temperature: 0.7,
+          max_tokens: 2048,
+        }),
+      });
+    } else {
+      if (!GROQ_API_KEY) throw new Error("GROQ_API_KEY is not configured");
+
+      response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${GROQ_API_KEY}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          model: "llama-3.3-70b-versatile",
+          messages: [
+            { role: "system", content: systemPrompt },
+            ...messages,
+          ],
+          stream: true,
+          temperature: 0.7,
+          max_tokens: 2048,
+        }),
+      });
+    }
 
     if (!response.ok) {
       if (response.status === 429) {
         return new Response(JSON.stringify({ error: "Rate limit exceeded. Please wait a moment." }), {
-          status: 429, headers: { ...corsHeaders, "Content-Type": "application/json" },
+          status: 429,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
         });
       }
+
       const t = await response.text();
-      console.error("Groq API error:", response.status, t);
+      console.error("Chat provider error:", response.status, t);
       return new Response(JSON.stringify({ error: "AI service temporarily unavailable." }), {
-        status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" },
+        status: 500,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
 
@@ -103,7 +161,8 @@ Always be supportive, clear, and engaging. Keep responses concise but thorough.`
   } catch (e) {
     console.error("chat error:", e);
     return new Response(JSON.stringify({ error: e instanceof Error ? e.message : "Unknown error" }), {
-      status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" },
+      status: 500,
+      headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
   }
 });

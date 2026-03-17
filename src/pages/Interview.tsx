@@ -1,11 +1,11 @@
 import { useState, useRef, useEffect, useCallback, useMemo } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { Send, Briefcase, Code, Users as UsersIcon, Rocket, ArrowLeft } from "lucide-react";
+import { Send, Briefcase, Code, Users as UsersIcon, Rocket, ArrowLeft, Camera, CameraOff } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import { streamChat, ChatMessage } from "@/lib/ai-stream";
 import { getSelectedCharacterId, getCharacterById } from "@/lib/characters";
-import { Link } from "react-router-dom";
 import { toast } from "sonner";
+import { useChatHistory } from "@/hooks/useChatHistory";
 
 type InterviewType = { id: string; label: string; icon: React.ElementType; prompt: string; color: string };
 
@@ -28,26 +28,91 @@ export default function InterviewPage() {
   const [messages, setMessages] = useState<DisplayMessage[]>([]);
   const [input, setInput] = useState("");
   const [isStreaming, setIsStreaming] = useState(false);
+  const [cameraEnabled, setCameraEnabled] = useState(false);
+  const [cameraError, setCameraError] = useState("");
+
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const mediaStreamRef = useRef<MediaStream | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
+
+  const mode = selectedType ? `interview-${selectedType.id}` : "interview-general";
+  const characterId = character?.id || "naruto";
+  const { messages: savedMessages, saveMessage, loaded } = useChatHistory(characterId, mode);
+
+  const stopCamera = useCallback(() => {
+    mediaStreamRef.current?.getTracks().forEach((track) => track.stop());
+    mediaStreamRef.current = null;
+    if (videoRef.current) videoRef.current.srcObject = null;
+    setCameraEnabled(false);
+  }, []);
+
+  const startCamera = useCallback(async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: "user", width: { ideal: 640 }, height: { ideal: 360 } },
+        audio: false,
+      });
+
+      mediaStreamRef.current = stream;
+      if (videoRef.current) videoRef.current.srcObject = stream;
+      setCameraEnabled(true);
+      setCameraError("");
+    } catch {
+      setCameraError("Camera access denied. You can continue without camera.");
+      setCameraEnabled(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    return () => stopCamera();
+  }, [stopCamera]);
+
+  useEffect(() => {
+    if (!selectedType || !loaded) return;
+
+    if (savedMessages.length > 0) {
+      setMessages(savedMessages);
+      return;
+    }
+
+    setMessages([{
+      id: "start",
+      role: "assistant",
+      content: `Welcome to **${selectedType.label} Practice**! 🎯\n\nI'll ask questions, evaluate your answer, and give clear feedback.\n\nType **Start** to begin.`
+    }]);
+  }, [selectedType, loaded, savedMessages]);
 
   const scrollToBottom = useCallback(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" });
   }, []);
 
-  useEffect(() => { scrollToBottom(); }, [messages, scrollToBottom]);
+  useEffect(() => {
+    scrollToBottom();
+  }, [messages, scrollToBottom]);
+
+  const captureCameraFrame = () => {
+    if (!cameraEnabled || !videoRef.current) return undefined;
+    const video = videoRef.current;
+    if (!video.videoWidth || !video.videoHeight) return undefined;
+
+    const canvas = document.createElement("canvas");
+    canvas.width = video.videoWidth;
+    canvas.height = video.videoHeight;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return undefined;
+
+    ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+    return canvas.toDataURL("image/jpeg", 0.7);
+  };
 
   const startInterview = (type: InterviewType) => {
     setSelectedType(type);
-    setMessages([{
-      id: "start",
-      role: "assistant",
-      content: `Welcome to **${type.label} Practice**! 🎯\n\nI'll ask you interview questions and evaluate your answers with detailed feedback. Let's begin!\n\nType "**Start**" when you're ready for your first question.`,
-    }]);
+    setMessages([]);
   };
 
   const handleSend = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!input.trim() || isStreaming) return;
+    if (!selectedType || !input.trim() || isStreaming) return;
 
     const userMsg: DisplayMessage = { id: Date.now().toString(), role: "user", content: input.trim() };
     const newMessages = [...messages, userMsg];
@@ -55,13 +120,22 @@ export default function InterviewPage() {
     setInput("");
     setIsStreaming(true);
 
+    void saveMessage("user", userMsg.content);
+
+    const cameraFrame = captureCameraFrame();
     const chatHistory: ChatMessage[] = newMessages.map((m) => ({ role: m.role, content: m.content }));
+    const contextualMessages: ChatMessage[] = [
+      { role: "user", content: `Interview track: ${selectedType.label}. ${selectedType.prompt}` },
+      ...chatHistory,
+    ];
+
     let assistantContent = "";
 
     await streamChat({
-      messages: chatHistory,
+      messages: contextualMessages,
       mode: "interview",
       characterPersonality: character?.personality,
+      cameraFrame,
       onDelta: (chunk) => {
         assistantContent += chunk;
         setMessages((prev) => {
@@ -72,17 +146,26 @@ export default function InterviewPage() {
           return [...prev, { id: `stream-${Date.now()}`, role: "assistant", content: assistantContent }];
         });
       },
-      onDone: () => setIsStreaming(false),
-      onError: (error) => { setIsStreaming(false); toast.error(error); },
+      onDone: () => {
+        setIsStreaming(false);
+        if (assistantContent) void saveMessage("assistant", assistantContent);
+      },
+      onError: (error) => {
+        setIsStreaming(false);
+        toast.error(error);
+      },
     });
   };
+
+  const answeredCount = messages.filter((m) => m.role === "user").length;
+  const progressPercent = Math.min(100, Math.round((answeredCount / 5) * 100));
 
   if (!selectedType) {
     return (
       <div className="min-h-screen px-6 pb-24 md:pt-20 pt-8">
         <div className="max-w-2xl mx-auto">
           <h1 className="text-2xl font-bold text-foreground mb-2">Interview Practice</h1>
-          <p className="text-muted-foreground mb-8">Choose an interview type. AI will ask questions and evaluate your answers.</p>
+          <p className="text-muted-foreground mb-8">Choose an interview type. You can optionally enable camera feedback for presence and delivery coaching.</p>
           <div className="grid gap-4 sm:grid-cols-2">
             {interviewTypes.map((type, i) => (
               <motion.button
@@ -109,16 +192,43 @@ export default function InterviewPage() {
   return (
     <div className="flex flex-col h-screen md:pt-14 pb-20 md:pb-0">
       <div className="flex items-center gap-3 px-4 py-3 border-b border-border bg-card/50 backdrop-blur-md">
-        <button onClick={() => { setSelectedType(null); setMessages([]); }} className="p-2 hover:bg-secondary rounded-lg transition-colors">
+        <button onClick={() => { setSelectedType(null); setMessages([]); stopCamera(); }} className="p-2 hover:bg-secondary rounded-lg transition-colors">
           <ArrowLeft className="w-4 h-4 text-muted-foreground" />
         </button>
-        <div>
+
+        <div className="flex-1">
           <h1 className="font-semibold text-foreground text-sm">{selectedType.label} Practice</h1>
-          <p className="text-xs text-muted-foreground">With {character?.name || "XOVA"}</p>
+          <p className="text-xs text-muted-foreground">With {character?.name || "XOVA"} · {answeredCount} answers</p>
         </div>
+
+        <button
+          onClick={() => (cameraEnabled ? stopCamera() : startCamera())}
+          className={`inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-medium ${cameraEnabled ? "bg-primary text-primary-foreground" : "bg-secondary text-foreground"}`}
+        >
+          {cameraEnabled ? <Camera className="w-3.5 h-3.5" /> : <CameraOff className="w-3.5 h-3.5" />}
+          {cameraEnabled ? "Camera on" : "Camera off"}
+        </button>
+      </div>
+
+      <div className="px-4 py-3 border-b border-border bg-card/40">
+        <div className="flex items-center justify-between mb-1">
+          <span className="text-xs text-muted-foreground">Interview progress</span>
+          <span className="text-xs text-foreground font-medium">{progressPercent}%</span>
+        </div>
+        <div className="w-full h-1.5 bg-secondary rounded-full">
+          <motion.div className="h-full bg-primary rounded-full" animate={{ width: `${progressPercent}%` }} />
+        </div>
+        {cameraError && <p className="text-xs text-destructive mt-2">{cameraError}</p>}
       </div>
 
       <div ref={scrollRef} className="flex-1 overflow-y-auto px-4 py-6 space-y-4">
+        {cameraEnabled && (
+          <div className="surface-card p-2 mb-4">
+            <video ref={videoRef} autoPlay muted playsInline className="w-full h-40 object-cover rounded-lg bg-secondary" />
+            <p className="text-[10px] text-muted-foreground mt-1">Camera snapshot is used with each answer for delivery feedback.</p>
+          </div>
+        )}
+
         <AnimatePresence mode="popLayout">
           {messages.map((msg) => (
             <motion.div key={msg.id} initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className={`flex ${msg.role === "user" ? "justify-end" : "justify-start"}`}>
