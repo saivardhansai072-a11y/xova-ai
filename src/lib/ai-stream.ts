@@ -7,6 +7,7 @@ export async function streamChat({
   messages,
   characterPersonality,
   mode,
+  cameraFrame,
   onDelta,
   onDone,
   onError,
@@ -14,6 +15,7 @@ export async function streamChat({
   messages: ChatMessage[];
   characterPersonality?: string;
   mode?: "interview" | "career" | "startup";
+  cameraFrame?: string;
   onDelta: (deltaText: string) => void;
   onDone: () => void;
   onError: (error: string) => void;
@@ -25,7 +27,7 @@ export async function streamChat({
         "Content-Type": "application/json",
         Authorization: `Bearer ${import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY}`,
       },
-      body: JSON.stringify({ messages, characterPersonality, mode }),
+      body: JSON.stringify({ messages, characterPersonality, mode, cameraFrame }),
     });
 
     if (!resp.ok) {
@@ -87,7 +89,9 @@ export async function streamChat({
           const parsed = JSON.parse(jsonStr);
           const content = parsed.choices?.[0]?.delta?.content as string | undefined;
           if (content) onDelta(content);
-        } catch { /* ignore */ }
+        } catch {
+          // ignore trailing parse errors
+        }
       }
     }
 
@@ -97,28 +101,84 @@ export async function streamChat({
   }
 }
 
-export async function speakWithElevenLabs(text: string, voiceId?: string): Promise<void> {
-  try {
-    const response = await fetch(TTS_URL, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        apikey: import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY,
-        Authorization: `Bearer ${import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY}`,
-      },
-      body: JSON.stringify({ text: text.slice(0, 500), voiceId }),
-    });
+function splitTextForSpeech(text: string, maxLen: number) {
+  const normalized = text.replace(/\s+/g, " ").trim();
+  if (!normalized) return [] as string[];
 
-    if (!response.ok) {
-      console.warn("TTS failed, falling back to browser TTS");
-      browserSpeak(text);
-      return;
+  const sentences = normalized.split(/(?<=[.!?])\s+/);
+  const chunks: string[] = [];
+  let current = "";
+
+  for (const sentence of sentences) {
+    if (!sentence) continue;
+    const candidate = current ? `${current} ${sentence}` : sentence;
+
+    if (candidate.length <= maxLen) {
+      current = candidate;
+      continue;
     }
 
-    const audioBlob = await response.blob();
-    const audioUrl = URL.createObjectURL(audioBlob);
-    const audio = new Audio(audioUrl);
-    await audio.play();
+    if (current) chunks.push(current);
+
+    if (sentence.length <= maxLen) {
+      current = sentence;
+      continue;
+    }
+
+    for (let i = 0; i < sentence.length; i += maxLen) {
+      chunks.push(sentence.slice(i, i + maxLen));
+    }
+    current = "";
+  }
+
+  if (current) chunks.push(current);
+  return chunks;
+}
+
+async function playAudioBlob(audioBlob: Blob) {
+  const audioUrl = URL.createObjectURL(audioBlob);
+  const audio = new Audio(audioUrl);
+
+  await new Promise<void>((resolve, reject) => {
+    audio.onended = () => {
+      URL.revokeObjectURL(audioUrl);
+      resolve();
+    };
+    audio.onerror = () => {
+      URL.revokeObjectURL(audioUrl);
+      reject(new Error("Audio playback failed"));
+    };
+
+    audio.play().catch((error) => {
+      URL.revokeObjectURL(audioUrl);
+      reject(error);
+    });
+  });
+}
+
+export async function speakWithElevenLabs(text: string, voiceId?: string): Promise<void> {
+  try {
+    const chunks = splitTextForSpeech(text, 420);
+    if (!chunks.length) return;
+
+    for (const chunk of chunks) {
+      const response = await fetch(TTS_URL, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          apikey: import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY,
+          Authorization: `Bearer ${import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY}`,
+        },
+        body: JSON.stringify({ text: chunk, voiceId }),
+      });
+
+      if (!response.ok) {
+        throw new Error(`TTS failed: ${response.status}`);
+      }
+
+      const audioBlob = await response.blob();
+      await playAudioBlob(audioBlob);
+    }
   } catch {
     browserSpeak(text);
   }
@@ -126,10 +186,26 @@ export async function speakWithElevenLabs(text: string, voiceId?: string): Promi
 
 export function browserSpeak(text: string) {
   if (!("speechSynthesis" in window)) return;
+
   window.speechSynthesis.cancel();
-  const clean = text.replace(/[#*`_~\[\]()>]/g, "");
-  const u = new SpeechSynthesisUtterance(clean);
-  u.rate = 0.95;
-  u.pitch = 1.05;
-  window.speechSynthesis.speak(u);
+  const clean = text.replace(/[#*`_~\[\]()>]/g, "").trim();
+  const chunks = splitTextForSpeech(clean, 180);
+  if (!chunks.length) return;
+
+  let index = 0;
+  const speakNext = () => {
+    if (index >= chunks.length) return;
+
+    const utterance = new SpeechSynthesisUtterance(chunks[index]);
+    utterance.rate = 0.95;
+    utterance.pitch = 1.05;
+    utterance.onend = () => {
+      index += 1;
+      speakNext();
+    };
+
+    window.speechSynthesis.speak(utterance);
+  };
+
+  speakNext();
 }

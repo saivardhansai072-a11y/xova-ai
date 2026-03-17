@@ -14,27 +14,74 @@ type Profile = {
 export function useProfile() {
   const { user } = useAuth();
   const [profile, setProfile] = useState<Profile | null>(null);
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    if (!user) return;
+    if (!user) {
+      setProfile(null);
+      setLoading(false);
+      return;
+    }
 
     const fetchProfile = async () => {
-      const { data } = await supabase
+      setLoading(true);
+
+      const { data, error } = await supabase
         .from("profiles")
         .select("*")
         .eq("id", user.id)
+        .maybeSingle();
+
+      if (error) {
+        setLoading(false);
+        return;
+      }
+
+      if (data) {
+        setProfile(data as Profile);
+        setLoading(false);
+        return;
+      }
+
+      const fallbackName = user.user_metadata?.full_name || user.email?.split("@")[0] || null;
+      const { data: created } = await supabase
+        .from("profiles")
+        .upsert({
+          id: user.id,
+          display_name: fallbackName,
+          avatar_url: null,
+          selected_character: null,
+          streak: 0,
+          last_visit: null,
+        }, { onConflict: "id" })
+        .select("*")
         .single();
-      if (data) setProfile(data as Profile);
+
+      if (created) setProfile(created as Profile);
+      setLoading(false);
     };
 
     fetchProfile();
   }, [user]);
 
   const updateProfile = async (updates: Partial<Profile>) => {
-    if (!user) return;
-    await supabase.from("profiles").update(updates).eq("id", user.id);
-    setProfile((prev) => prev ? { ...prev, ...updates } : null);
+    if (!user) return { error: new Error("Not authenticated") };
+
+    const payload = {
+      id: user.id,
+      ...updates,
+    };
+
+    const { data, error } = await supabase
+      .from("profiles")
+      .upsert(payload, { onConflict: "id" })
+      .select("*")
+      .single();
+
+    if (!error && data) setProfile(data as Profile);
+
+    return { error };
   };
 
-  return { profile, updateProfile };
+  return { profile, loading, updateProfile };
 }

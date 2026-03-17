@@ -10,11 +10,13 @@ import { getSelectedCharacterId, getCharacterById } from "@/lib/characters";
 import { useAuth } from "@/contexts/AuthContext";
 import { useQuizProgress } from "@/hooks/useQuizProgress";
 import { useProfile } from "@/hooks/useProfile";
+import { useActivityProgress } from "@/hooks/useActivityProgress";
 
 export default function DashboardPage() {
   const { user } = useAuth();
   const { profile, updateProfile } = useProfile();
   const { progress } = useQuizProgress();
+  const { activity } = useActivityProgress();
 
   const character = useMemo(() => {
     const id = getSelectedCharacterId();
@@ -23,7 +25,6 @@ export default function DashboardPage() {
 
   const [streak, setStreak] = useState(0);
 
-  // Calculate stats from DB progress
   const totalQuestions = Object.values(progress).reduce((a, p) => a + p.total, 0);
   const totalCorrect = Object.values(progress).reduce((a, p) => a + p.correct, 0);
   const accuracy = totalQuestions > 0 ? Math.round((totalCorrect / totalQuestions) * 100) : 0;
@@ -47,8 +48,8 @@ export default function DashboardPage() {
 
   const missions = [
     { id: "1", title: "Solve 5 Aptitude Questions", description: "Sharpen your mind", icon: Brain, target: 5, current: Math.min(totalQuestions, 5), link: "/aptitude", color: "text-primary" },
-    { id: "2", title: "Practice 1 Interview Question", description: "Prepare for success", icon: Briefcase, target: 1, current: 0, link: "/interview", color: "text-yellow-400" },
-    { id: "3", title: "Chat with Your Mentor", description: "Learn something new", icon: MessageCircle, target: 1, current: 0, link: "/chat", color: "text-green-400" },
+    { id: "2", title: "Practice 1 Interview Question", description: "Prepare for success", icon: Briefcase, target: 1, current: Math.min(activity.interviewTurns, 1), link: "/interview", color: "text-yellow-400" },
+    { id: "3", title: "Chat with Your Mentor", description: "Learn something new", icon: MessageCircle, target: 1, current: Math.min(activity.chatTurns, 1), link: "/chat", color: "text-green-400" },
     { id: "4", title: "Explore a Career Path", description: "Plan your future", icon: Compass, target: 1, current: 0, link: "/career", color: "text-purple-400" },
   ];
 

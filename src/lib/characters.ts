@@ -14,6 +14,7 @@ export type AICharacter = {
   glowColor: string;
   personality: string;
   greeting: string;
+  voiceId?: string;
   isCustom?: boolean;
 };
 
@@ -25,6 +26,7 @@ export const defaultCharacters: AICharacter[] = [
     image: gokuImg,
     color: "from-orange-500 to-yellow-400",
     glowColor: "rgba(249, 115, 22, 0.4)",
+    voiceId: "JBFqnCBsd6RMkjVDRZzb",
     personality: `You are Goku from Dragon Ball Z acting as an AI mentor. You are enthusiastic, energetic, and always excited about learning new things — just like training!
 Key traits:
 - You compare learning to training and getting stronger
@@ -43,6 +45,7 @@ Key traits:
     image: narutoImg,
     color: "from-orange-400 to-blue-500",
     glowColor: "rgba(59, 130, 246, 0.4)",
+    voiceId: "TX3LPaxmHKxFdv7VOQHJ",
     personality: `You are Naruto Uzumaki acting as an AI mentor. You never give up and believe in every student!
 Key traits:
 - You say "Believe it!" and "Dattebayo!" occasionally
@@ -61,6 +64,7 @@ Key traits:
     image: luffyImg,
     color: "from-red-500 to-yellow-500",
     glowColor: "rgba(239, 68, 68, 0.4)",
+    voiceId: "pqHfZKP75CvOlQylNhV4",
     personality: `You are Monkey D. Luffy from One Piece acting as an AI mentor. You're adventurous and turn everything into an exciting journey!
 Key traits:
 - You treat every learning topic as a new adventure on the Grand Line
@@ -79,6 +83,7 @@ Key traits:
     image: hinataImg,
     color: "from-indigo-400 to-purple-400",
     glowColor: "rgba(129, 140, 248, 0.4)",
+    voiceId: "XrExE9yKIg1WjnnlVkGX",
     personality: `You are Hinata Hyuga from Naruto acting as an AI mentor. You're gentle, patient, and deeply encouraging!
 Key traits:
 - You're soft-spoken but incredibly supportive and patient
@@ -97,6 +102,7 @@ Key traits:
     image: mikasaImg,
     color: "from-gray-600 to-red-700",
     glowColor: "rgba(185, 28, 28, 0.4)",
+    voiceId: "FGY2WhTYpPnrIDTdsKH5",
     personality: `You are Mikasa Ackerman from Attack on Titan acting as an AI mentor. You're focused, disciplined, and fiercely protective of your student's success!
 Key traits:
 - You're serious, focused, and no-nonsense in teaching
@@ -115,6 +121,7 @@ Key traits:
     image: suzumeImg,
     color: "from-pink-400 to-sky-400",
     glowColor: "rgba(244, 114, 182, 0.4)",
+    voiceId: "EXAVITQu4vr4xnSDxMaL",
     personality: `You are Suzume from Suzume no Tojimari acting as an AI mentor. You're brave, curious, and full of wonder!
 Key traits:
 - You're warm, curious, and see beauty in learning new things
@@ -137,11 +144,9 @@ export type CustomCharacterData = {
 };
 
 export function getCharacterById(id: string): AICharacter | undefined {
-  // Check defaults
   const found = defaultCharacters.find((c) => c.id === id);
   if (found) return found;
 
-  // Check custom characters in localStorage
   const customs = getCustomCharacters();
   return customs.find((c) => c.id === id);
 }
@@ -157,9 +162,10 @@ export function saveCustomCharacter(data: CustomCharacterData): AICharacter {
     id: `custom-${Date.now()}`,
     name: data.name,
     anime: data.anime || "Custom",
-    image: "", // Will use initials fallback
+    image: "",
     color: data.color || "from-emerald-400 to-cyan-500",
     glowColor: "rgba(16, 185, 129, 0.4)",
+    voiceId: "onwK4e9ZLuTAKqWW03F9",
     personality: data.personality,
     greeting: data.greeting,
     isCustom: true,

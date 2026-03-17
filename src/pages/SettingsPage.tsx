@@ -1,6 +1,7 @@
 import { useState } from "react";
+import { Link } from "react-router-dom";
 import { motion } from "framer-motion";
-import { Volume2, Zap, Palette, Info, LogOut } from "lucide-react";
+import { Volume2, Zap, Palette, Info, LogOut, UserRoundCog, KeyRound } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
 import { useProfile } from "@/hooks/useProfile";
 
@@ -50,11 +51,10 @@ export default function SettingsPage() {
       <div className="max-w-lg mx-auto">
         <h1 className="text-2xl font-bold text-foreground mb-6">Settings</h1>
 
-        {/* Profile section */}
         <div className="surface-card p-4 flex items-center gap-3 mb-6">
           <div className="w-12 h-12 rounded-full bg-gradient-to-br from-primary to-accent flex items-center justify-center overflow-hidden">
             {profile?.avatar_url ? (
-              <img src={profile.avatar_url} alt="" className="w-full h-full object-cover" />
+              <img src={profile.avatar_url} alt="User avatar" className="w-full h-full object-cover" />
             ) : (
               <span className="text-lg font-bold text-primary-foreground">
                 {(profile?.display_name || user?.email || "U").charAt(0).toUpperCase()}
@@ -68,6 +68,26 @@ export default function SettingsPage() {
         </div>
 
         <div className="space-y-3">
+          <Link to="/profile" className="surface-card p-4 flex items-center gap-3 hover:border-primary/30 transition-colors block">
+            <div className="w-10 h-10 rounded-lg bg-secondary flex items-center justify-center">
+              <UserRoundCog className="w-5 h-5 text-primary" />
+            </div>
+            <div>
+              <h3 className="text-sm font-medium text-foreground">Edit Profile</h3>
+              <p className="text-xs text-muted-foreground">Update your display name and avatar</p>
+            </div>
+          </Link>
+
+          <Link to="/forgot-password" className="surface-card p-4 flex items-center gap-3 hover:border-primary/30 transition-colors block">
+            <div className="w-10 h-10 rounded-lg bg-secondary flex items-center justify-center">
+              <KeyRound className="w-5 h-5 text-primary" />
+            </div>
+            <div>
+              <h3 className="text-sm font-medium text-foreground">Reset Password</h3>
+              <p className="text-xs text-muted-foreground">Send a password reset link to your email</p>
+            </div>
+          </Link>
+
           <SettingToggle label="Voice Responses" description="Enable text-to-speech for mentor responses" icon={Volume2} checked={voiceEnabled} onChange={setVoiceEnabled} />
           <SettingToggle label="Animations" description="Enable mentor avatar animations" icon={Zap} checked={animations} onChange={setAnimations} />
           <SettingToggle label="High Contrast" description="Increase visual contrast for accessibility" icon={Palette} checked={highContrast} onChange={setHighContrast} />
@@ -96,7 +116,7 @@ export default function SettingsPage() {
             and animated interactions to create a personalized educational experience.
           </p>
           <div className="mt-4 flex gap-4 text-xs text-muted-foreground">
-            <span>Version 2.0.0</span>
+            <span>Version 2.1.0</span>
             <span>•</span>
             <span>Built with ❤️</span>
           </div>

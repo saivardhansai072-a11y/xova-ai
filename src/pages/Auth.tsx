@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { Link } from "react-router-dom";
 import { motion } from "framer-motion";
 import { Mail, Lock, User, LogIn, UserPlus, Loader2 } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
@@ -51,7 +52,6 @@ export default function AuthPage() {
         animate={{ opacity: 1, y: 0 }}
         className="w-full max-w-sm"
       >
-        {/* Logo */}
         <div className="text-center mb-8">
           <div className="w-14 h-14 rounded-2xl bg-primary flex items-center justify-center mx-auto mb-3">
             <span className="text-xl font-bold text-primary-foreground">X</span>
@@ -62,7 +62,6 @@ export default function AuthPage() {
           </p>
         </div>
 
-        {/* Google Button */}
         <button
           onClick={handleGoogle}
           className="w-full surface-card p-3 flex items-center justify-center gap-3 hover:border-primary/30 transition-colors mb-4"
@@ -82,7 +81,6 @@ export default function AuthPage() {
           <div className="flex-1 h-px bg-border" />
         </div>
 
-        {/* Form */}
         <form onSubmit={handleSubmit} className="space-y-3">
           {!isLogin && (
             <div className="relative">
@@ -96,6 +94,7 @@ export default function AuthPage() {
               />
             </div>
           )}
+
           <div className="relative">
             <Mail className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
             <input
@@ -107,6 +106,7 @@ export default function AuthPage() {
               className="w-full bg-secondary rounded-xl pl-10 pr-4 py-3 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/30"
             />
           </div>
+
           <div className="relative">
             <Lock className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
             <input
@@ -119,6 +119,14 @@ export default function AuthPage() {
               className="w-full bg-secondary rounded-xl pl-10 pr-4 py-3 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/30"
             />
           </div>
+
+          {isLogin && (
+            <div className="text-right">
+              <Link to="/forgot-password" className="text-xs text-primary hover:underline">
+                Forgot password?
+              </Link>
+            </div>
+          )}
 
           <button
             type="submit"
@@ -140,6 +148,7 @@ export default function AuthPage() {
           <button
             onClick={() => setIsLogin(!isLogin)}
             className="text-primary hover:underline font-medium"
+            type="button"
           >
             {isLogin ? "Sign up" : "Sign in"}
           </button>
