@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect, useCallback, useMemo } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { Send, Briefcase, Code, Users as UsersIcon, Rocket, ArrowLeft, Camera, CameraOff } from "lucide-react";
+import { Send, Briefcase, Code, Users as UsersIcon, Rocket, ArrowLeft, Camera, CameraOff, Mic, MicOff } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import { streamChat, ChatMessage } from "@/lib/ai-stream";
 import { getSelectedCharacterId, getCharacterById } from "@/lib/characters";
@@ -30,14 +30,75 @@ export default function InterviewPage() {
   const [isStreaming, setIsStreaming] = useState(false);
   const [cameraEnabled, setCameraEnabled] = useState(false);
   const [cameraError, setCameraError] = useState("");
+  const [micEnabled, setMicEnabled] = useState(false);
+  const [isRecording, setIsRecording] = useState(false);
 
   const videoRef = useRef<HTMLVideoElement>(null);
   const mediaStreamRef = useRef<MediaStream | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
+  const recognitionRef = useRef<any>(null);
 
   const mode = selectedType ? `interview-${selectedType.id}` : "interview-general";
   const characterId = character?.id || "naruto";
   const { messages: savedMessages, saveMessage, loaded } = useChatHistory(characterId, mode);
+
+  // Speech recognition setup
+  const startMic = useCallback(() => {
+    const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+    if (!SpeechRecognition) {
+      toast.error("Speech recognition not supported in this browser.");
+      return;
+    }
+
+    const recognition = new SpeechRecognition();
+    recognition.continuous = true;
+    recognition.interimResults = true;
+    recognition.lang = "en-US";
+
+    recognition.onresult = (event: any) => {
+      let finalTranscript = "";
+      let interimTranscript = "";
+      for (let i = event.resultIndex; i < event.results.length; i++) {
+        if (event.results[i].isFinal) {
+          finalTranscript += event.results[i][0].transcript;
+        } else {
+          interimTranscript += event.results[i][0].transcript;
+        }
+      }
+      if (finalTranscript) {
+        setInput((prev) => (prev + " " + finalTranscript).trim());
+      }
+    };
+
+    recognition.onerror = (event: any) => {
+      console.error("Speech recognition error:", event.error);
+      if (event.error !== "no-speech") {
+        toast.error("Microphone error: " + event.error);
+      }
+    };
+
+    recognition.onend = () => {
+      // Restart if still enabled
+      if (micEnabled) {
+        try { recognition.start(); } catch {}
+      }
+    };
+
+    recognitionRef.current = recognition;
+    recognition.start();
+    setMicEnabled(true);
+    setIsRecording(true);
+  }, [micEnabled]);
+
+  const stopMic = useCallback(() => {
+    if (recognitionRef.current) {
+      recognitionRef.current.onend = null;
+      recognitionRef.current.stop();
+      recognitionRef.current = null;
+    }
+    setMicEnabled(false);
+    setIsRecording(false);
+  }, []);
 
   const stopCamera = useCallback(() => {
     mediaStreamRef.current?.getTracks().forEach((track) => track.stop());
@@ -49,36 +110,39 @@ export default function InterviewPage() {
   const startCamera = useCallback(async () => {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: "user", width: { ideal: 640 }, height: { ideal: 360 } },
+        video: { facingMode: "user", width: { ideal: 640 }, height: { ideal: 480 } },
         audio: false,
       });
-
       mediaStreamRef.current = stream;
-      if (videoRef.current) videoRef.current.srcObject = stream;
+      if (videoRef.current) {
+        videoRef.current.srcObject = stream;
+        videoRef.current.play();
+      }
       setCameraEnabled(true);
       setCameraError("");
     } catch {
-      setCameraError("Camera access denied. You can continue without camera.");
+      setCameraError("Camera access denied.");
       setCameraEnabled(false);
     }
   }, []);
 
   useEffect(() => {
-    return () => stopCamera();
-  }, [stopCamera]);
+    return () => {
+      stopCamera();
+      stopMic();
+    };
+  }, [stopCamera, stopMic]);
 
   useEffect(() => {
     if (!selectedType || !loaded) return;
-
     if (savedMessages.length > 0) {
       setMessages(savedMessages);
       return;
     }
-
     setMessages([{
       id: "start",
       role: "assistant",
-      content: `Welcome to **${selectedType.label} Practice**! 🎯\n\nI'll ask questions, evaluate your answer, and give clear feedback.\n\nType **Start** to begin.`
+      content: `Welcome to **${selectedType.label} Practice**! 🎯\n\nI'll ask questions, evaluate your answer, and give clear feedback.\n\n${cameraEnabled ? "📸 Camera is on — I'll give delivery feedback too.\n\n" : ""}🎤 Use the mic button to speak your answers, or type them.\n\nType **Start** to begin.`
     }]);
   }, [selectedType, loaded, savedMessages]);
 
@@ -94,13 +158,11 @@ export default function InterviewPage() {
     if (!cameraEnabled || !videoRef.current) return undefined;
     const video = videoRef.current;
     if (!video.videoWidth || !video.videoHeight) return undefined;
-
     const canvas = document.createElement("canvas");
     canvas.width = video.videoWidth;
     canvas.height = video.videoHeight;
     const ctx = canvas.getContext("2d");
     if (!ctx) return undefined;
-
     ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
     return canvas.toDataURL("image/jpeg", 0.7);
   };
@@ -165,7 +227,7 @@ export default function InterviewPage() {
       <div className="min-h-screen px-6 pb-24 md:pt-20 pt-8">
         <div className="max-w-2xl mx-auto">
           <h1 className="text-2xl font-bold text-foreground mb-2">Interview Practice</h1>
-          <p className="text-muted-foreground mb-8">Choose an interview type. You can optionally enable camera feedback for presence and delivery coaching.</p>
+          <p className="text-muted-foreground mb-8">Choose an interview type. Enable camera for delivery coaching and mic to speak answers.</p>
           <div className="grid gap-4 sm:grid-cols-2">
             {interviewTypes.map((type, i) => (
               <motion.button
@@ -191,26 +253,35 @@ export default function InterviewPage() {
 
   return (
     <div className="flex flex-col h-screen md:pt-14 pb-20 md:pb-0">
+      {/* Header */}
       <div className="flex items-center gap-3 px-4 py-3 border-b border-border bg-card/50 backdrop-blur-md">
-        <button onClick={() => { setSelectedType(null); setMessages([]); stopCamera(); }} className="p-2 hover:bg-secondary rounded-lg transition-colors">
+        <button onClick={() => { setSelectedType(null); setMessages([]); stopCamera(); stopMic(); }} className="p-2 hover:bg-secondary rounded-lg transition-colors">
           <ArrowLeft className="w-4 h-4 text-muted-foreground" />
         </button>
-
         <div className="flex-1">
           <h1 className="font-semibold text-foreground text-sm">{selectedType.label} Practice</h1>
           <p className="text-xs text-muted-foreground">With {character?.name || "XOVA"} · {answeredCount} answers</p>
         </div>
-
-        <button
-          onClick={() => (cameraEnabled ? stopCamera() : startCamera())}
-          className={`inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-medium ${cameraEnabled ? "bg-primary text-primary-foreground" : "bg-secondary text-foreground"}`}
-        >
-          {cameraEnabled ? <Camera className="w-3.5 h-3.5" /> : <CameraOff className="w-3.5 h-3.5" />}
-          {cameraEnabled ? "Camera on" : "Camera off"}
-        </button>
+        <div className="flex gap-1.5">
+          <button
+            onClick={() => (micEnabled ? stopMic() : startMic())}
+            className={`inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-medium transition-colors ${micEnabled ? "bg-destructive text-destructive-foreground" : "bg-secondary text-foreground"}`}
+          >
+            {micEnabled ? <Mic className="w-3.5 h-3.5" /> : <MicOff className="w-3.5 h-3.5" />}
+            {micEnabled ? "Mic on" : "Mic"}
+          </button>
+          <button
+            onClick={() => (cameraEnabled ? stopCamera() : startCamera())}
+            className={`inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-medium transition-colors ${cameraEnabled ? "bg-primary text-primary-foreground" : "bg-secondary text-foreground"}`}
+          >
+            {cameraEnabled ? <Camera className="w-3.5 h-3.5" /> : <CameraOff className="w-3.5 h-3.5" />}
+            {cameraEnabled ? "Cam on" : "Cam"}
+          </button>
+        </div>
       </div>
 
-      <div className="px-4 py-3 border-b border-border bg-card/40">
+      {/* Progress */}
+      <div className="px-4 py-2.5 border-b border-border bg-card/40">
         <div className="flex items-center justify-between mb-1">
           <span className="text-xs text-muted-foreground">Interview progress</span>
           <span className="text-xs text-foreground font-medium">{progressPercent}%</span>
@@ -218,15 +289,39 @@ export default function InterviewPage() {
         <div className="w-full h-1.5 bg-secondary rounded-full">
           <motion.div className="h-full bg-primary rounded-full" animate={{ width: `${progressPercent}%` }} />
         </div>
-        {cameraError && <p className="text-xs text-destructive mt-2">{cameraError}</p>}
+        {cameraError && <p className="text-xs text-destructive mt-1">{cameraError}</p>}
       </div>
 
-      <div ref={scrollRef} className="flex-1 overflow-y-auto px-4 py-6 space-y-4">
+      {/* Chat + Camera */}
+      <div ref={scrollRef} className="flex-1 overflow-y-auto px-4 py-4 space-y-3">
+        {/* Camera preview */}
         {cameraEnabled && (
-          <div className="surface-card p-2 mb-4">
-            <video ref={videoRef} autoPlay muted playsInline className="w-full h-40 object-cover rounded-lg bg-secondary" />
-            <p className="text-[10px] text-muted-foreground mt-1">Camera snapshot is used with each answer for delivery feedback.</p>
+          <div className="surface-card p-2 mb-3 max-w-sm mx-auto">
+            <video
+              ref={videoRef}
+              autoPlay
+              muted
+              playsInline
+              className="w-full aspect-video object-cover rounded-lg bg-secondary"
+              style={{ transform: "scaleX(-1)" }}
+            />
+            <p className="text-[10px] text-muted-foreground text-center mt-1">Your camera feed — AI analyzes snapshots with each answer</p>
           </div>
+        )}
+
+        {/* Hidden video element when camera is on but outside view */}
+        {!cameraEnabled && <video ref={videoRef} className="hidden" />}
+
+        {/* Mic recording indicator */}
+        {isRecording && (
+          <motion.div
+            className="flex items-center justify-center gap-2 py-2"
+            animate={{ opacity: [1, 0.5, 1] }}
+            transition={{ duration: 1.5, repeat: Infinity }}
+          >
+            <div className="w-2 h-2 rounded-full bg-destructive" />
+            <span className="text-xs text-muted-foreground">Listening... speak your answer</span>
+          </motion.div>
         )}
 
         <AnimatePresence mode="popLayout">
@@ -244,9 +339,10 @@ export default function InterviewPage() {
         </AnimatePresence>
       </div>
 
+      {/* Input */}
       <form onSubmit={handleSend} className="px-4 py-3 border-t border-border bg-card/50 backdrop-blur-md">
         <div className="flex gap-2 max-w-3xl mx-auto">
-          <input value={input} onChange={(e) => setInput(e.target.value)} placeholder="Type your answer..." disabled={isStreaming} className="flex-1 bg-secondary rounded-xl px-4 py-3 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 disabled:opacity-50" />
+          <input value={input} onChange={(e) => setInput(e.target.value)} placeholder="Type or speak your answer..." disabled={isStreaming} className="flex-1 bg-secondary rounded-xl px-4 py-3 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 disabled:opacity-50" />
           <button type="submit" disabled={!input.trim() || isStreaming} className="p-3 rounded-xl bg-primary text-primary-foreground hover:opacity-90 disabled:opacity-40">
             <Send className="w-4 h-4" />
           </button>
