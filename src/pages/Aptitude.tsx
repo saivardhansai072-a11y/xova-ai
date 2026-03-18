@@ -1,8 +1,19 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { CheckCircle2, XCircle, ArrowRight, RotateCcw, Trophy, ChevronLeft, Search, BookOpen } from "lucide-react";
-import { aptitudeTopics, AptitudeTopic, AptitudeSubtopic } from "@/lib/aptitude-data";
+import { CheckCircle2, XCircle, ArrowRight, RotateCcw, Trophy, ChevronLeft, Search, BookOpen, Sparkles, Loader2 } from "lucide-react";
+import { aptitudeTopics, AptitudeTopic, AptitudeSubtopic, AptitudeQuestion } from "@/lib/aptitude-data";
 import { useQuizProgress } from "@/hooks/useQuizProgress";
+import { supabase } from "@/integrations/supabase/client";
+import { toast } from "sonner";
+
+function shuffleArray<T>(arr: T[]): T[] {
+  const a = [...arr];
+  for (let i = a.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [a[i], a[j]] = [a[j], a[i]];
+  }
+  return a;
+}
 
 export default function AptitudePage() {
   const { progress, saveProgress, loaded } = useQuizProgress();
@@ -14,9 +25,95 @@ export default function AptitudePage() {
   const [answered, setAnswered] = useState(false);
   const [finished, setFinished] = useState(false);
   const [search, setSearch] = useState("");
+  const [activeQuestions, setActiveQuestions] = useState<AptitudeQuestion[]>([]);
+  const [generatingAI, setGeneratingAI] = useState(false);
+  const usedQuestionIds = useRef<Set<number>>(new Set());
 
-  const questions = selectedSub?.questions || [];
-  const q = questions[currentQ];
+  const q = activeQuestions[currentQ];
+
+  // When subtopic is selected, shuffle questions and skip already-seen ones
+  const startSubtopic = useCallback((sub: AptitudeSubtopic) => {
+    setSelectedSub(sub);
+    const shuffled = shuffleArray(sub.questions);
+    setActiveQuestions(shuffled);
+    usedQuestionIds.current = new Set(shuffled.map((q) => q.id));
+    setCurrentQ(0);
+    setSelected(null);
+    setScore(0);
+    setAnswered(false);
+    setFinished(false);
+  }, []);
+
+  // Generate new AI questions when user finishes all hardcoded ones
+  const generateAIQuestions = useCallback(async (topicName: string, subName: string) => {
+    setGeneratingAI(true);
+    try {
+      const { data, error } = await supabase.functions.invoke("chat", {
+        body: {
+          messages: [
+            {
+              role: "user",
+              content: `Generate exactly 5 new aptitude questions for the topic "${topicName}" > "${subName}". 
+Each question must be unique and professional-level for job placement exams.
+
+Return ONLY a JSON array in this exact format, no other text:
+[{"question":"...","options":["A","B","C","D"],"correct":0,"explanation":"..."}]
+
+Make questions challenging but fair. correct is the 0-based index of the right answer.`,
+            },
+          ],
+          mode: "career",
+        },
+      });
+
+      if (error) throw error;
+
+      // Parse SSE stream response to get the full text
+      const text = typeof data === "string" ? data : "";
+      // Try to extract JSON from the response
+      const jsonMatch = text.match(/\[[\s\S]*\]/);
+      if (jsonMatch) {
+        const parsed = JSON.parse(jsonMatch[0]) as Array<{
+          question: string;
+          options: string[];
+          correct: number;
+          explanation: string;
+        }>;
+
+        const newQuestions: AptitudeQuestion[] = parsed.map((q, i) => ({
+          id: Date.now() + i,
+          question: q.question,
+          options: q.options,
+          correct: q.correct,
+          explanation: q.explanation,
+        }));
+
+        setActiveQuestions(newQuestions);
+        setCurrentQ(0);
+        setSelected(null);
+        setScore(0);
+        setAnswered(false);
+        setFinished(false);
+        toast.success("New AI-generated questions loaded!");
+      } else {
+        throw new Error("Could not parse AI response");
+      }
+    } catch (err) {
+      console.error("AI question generation failed:", err);
+      toast.error("Couldn't generate new questions. Reshuffling existing ones.");
+      // Fallback: reshuffle existing questions
+      if (selectedSub) {
+        setActiveQuestions(shuffleArray(selectedSub.questions));
+        setCurrentQ(0);
+        setSelected(null);
+        setScore(0);
+        setAnswered(false);
+        setFinished(false);
+      }
+    } finally {
+      setGeneratingAI(false);
+    }
+  }, [selectedSub]);
 
   const handleSelect = (idx: number) => {
     if (answered) return;
@@ -30,7 +127,7 @@ export default function AptitudePage() {
   };
 
   const handleNext = () => {
-    if (currentQ + 1 >= questions.length) {
+    if (currentQ + 1 >= activeQuestions.length) {
       setFinished(true);
     } else {
       setCurrentQ((c) => c + 1);
@@ -57,15 +154,6 @@ export default function AptitudePage() {
     goBack();
   };
 
-  const startSubtopic = (sub: AptitudeSubtopic) => {
-    setSelectedSub(sub);
-    setCurrentQ(0);
-    setSelected(null);
-    setScore(0);
-    setAnswered(false);
-    setFinished(false);
-  };
-
   const goBack = () => {
     if (finished || selectedSub) {
       setSelectedSub(null);
@@ -74,6 +162,7 @@ export default function AptitudePage() {
       setSelected(null);
       setScore(0);
       setAnswered(false);
+      setActiveQuestions([]);
     } else {
       setSelectedTopic(null);
     }
@@ -87,13 +176,14 @@ export default function AptitudePage() {
   const totalCorrect = Object.values(progress).reduce((a, p) => a + p.correct, 0);
   const overallAcc = totalAttempted > 0 ? Math.round((totalCorrect / totalAttempted) * 100) : 0;
 
+  // Topic list
   if (!selectedTopic) {
     return (
       <div className="min-h-screen px-4 pb-24 md:pt-20 pt-8">
         <div className="max-w-4xl mx-auto">
           <h1 className="text-2xl font-bold text-foreground mb-1">Aptitude Training</h1>
           <p className="text-sm text-muted-foreground mb-4">
-            {aptitudeTopics.length} topics · Practice & improve
+            {aptitudeTopics.length} topics · Professional job placement practice
           </p>
 
           <div className="grid grid-cols-3 gap-3 mb-6">
@@ -159,6 +249,7 @@ export default function AptitudePage() {
     );
   }
 
+  // Subtopic list
   if (!selectedSub) {
     return (
       <div className="min-h-screen px-4 pb-24 md:pt-20 pt-8">
@@ -210,24 +301,35 @@ export default function AptitudePage() {
     );
   }
 
+  // Finished screen
   if (finished) {
-    const pct = Math.round((score / questions.length) * 100);
+    const pct = Math.round((score / activeQuestions.length) * 100);
     return (
       <div className="min-h-screen flex items-center justify-center px-4 pb-24 md:pt-16">
         <motion.div initial={{ opacity: 0, scale: 0.9 }} animate={{ opacity: 1, scale: 1 }} className="surface-card p-8 text-center max-w-md w-full">
           <Trophy className={`w-12 h-12 mx-auto ${pct >= 80 ? "text-yellow-400" : pct >= 60 ? "text-primary" : "text-muted-foreground"}`} />
           <h2 className="text-2xl font-bold text-foreground mt-4">Set Complete!</h2>
           <p className="text-4xl font-bold text-gradient-primary mt-2">{pct}%</p>
-          <p className="text-muted-foreground mt-2">{score}/{questions.length} correct</p>
+          <p className="text-muted-foreground mt-2">{score}/{activeQuestions.length} correct</p>
           <p className="text-sm text-muted-foreground mt-1">
             {pct >= 80 ? "Outstanding! 🔥" : pct >= 60 ? "Good job! Keep going! 💪" : "Keep practicing! You'll get there! ✨"}
           </p>
-          <div className="flex gap-3 justify-center mt-6">
-            <button onClick={() => startSubtopic(selectedSub)} className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-secondary text-foreground text-sm font-medium">
-              <RotateCcw className="w-4 h-4" /> Retry
-            </button>
-            <button onClick={autoAdvance} className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-primary text-primary-foreground text-sm font-medium">
-              Next Set <ArrowRight className="w-4 h-4" />
+          <div className="flex flex-col gap-3 mt-6">
+            <div className="flex gap-3 justify-center">
+              <button onClick={() => startSubtopic(selectedSub)} className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-secondary text-foreground text-sm font-medium">
+                <RotateCcw className="w-4 h-4" /> Retry
+              </button>
+              <button onClick={autoAdvance} className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-primary text-primary-foreground text-sm font-medium">
+                Next Set <ArrowRight className="w-4 h-4" />
+              </button>
+            </div>
+            <button
+              onClick={() => generateAIQuestions(selectedTopic.name, selectedSub.name)}
+              disabled={generatingAI}
+              className="inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-accent text-accent-foreground text-sm font-medium disabled:opacity-50"
+            >
+              {generatingAI ? <Loader2 className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4" />}
+              {generatingAI ? "Generating..." : "Generate New Questions (AI)"}
             </button>
           </div>
           <button onClick={goBack} className="text-xs text-muted-foreground mt-4 hover:text-foreground">
@@ -238,6 +340,9 @@ export default function AptitudePage() {
     );
   }
 
+  if (!q) return null;
+
+  // Quiz question
   return (
     <div className="min-h-screen px-4 pb-24 md:pt-20 pt-8">
       <div className="max-w-2xl mx-auto">
@@ -245,11 +350,11 @@ export default function AptitudePage() {
           <ChevronLeft className="w-4 h-4" /> {selectedTopic.name}
         </button>
         <div className="flex items-center justify-between mb-4">
-          <span className="text-sm text-muted-foreground">{selectedSub.name} · Q{currentQ + 1}/{questions.length}</span>
+          <span className="text-sm text-muted-foreground">{selectedSub.name} · Q{currentQ + 1}/{activeQuestions.length}</span>
           <span className="text-sm font-medium text-primary">Score: {score}</span>
         </div>
         <div className="w-full h-1.5 bg-secondary rounded-full mb-6">
-          <motion.div className="h-full bg-primary rounded-full" animate={{ width: `${((currentQ + 1) / questions.length) * 100}%` }} />
+          <motion.div className="h-full bg-primary rounded-full" animate={{ width: `${((currentQ + 1) / activeQuestions.length) * 100}%` }} />
         </div>
         <AnimatePresence mode="wait">
           <motion.div key={q.id} initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }}>
@@ -281,7 +386,7 @@ export default function AptitudePage() {
             {answered && (
               <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="mt-5 flex justify-end">
                 <button onClick={handleNext} className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-primary text-primary-foreground text-sm font-medium">
-                  {currentQ + 1 >= questions.length ? "Results" : "Next"} <ArrowRight className="w-4 h-4" />
+                  {currentQ + 1 >= activeQuestions.length ? "Results" : "Next"} <ArrowRight className="w-4 h-4" />
                 </button>
               </motion.div>
             )}
