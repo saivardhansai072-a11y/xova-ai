@@ -165,7 +165,7 @@ export function saveCustomCharacter(data: CustomCharacterData): AICharacter {
     image: "",
     color: data.color || "from-emerald-400 to-cyan-500",
     glowColor: "rgba(16, 185, 129, 0.4)",
-    voiceId: "onwK4e9ZLuTAKqWW03F9",
+    voiceId: "nPczCjzI2devNBz1zQrb",
     personality: data.personality,
     greeting: data.greeting,
     isCustom: true,
