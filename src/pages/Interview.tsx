@@ -1,8 +1,9 @@
 import { useState, useRef, useEffect, useCallback, useMemo } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { Send, Briefcase, Code, Users as UsersIcon, Rocket, ArrowLeft, Camera, CameraOff, Mic, MicOff } from "lucide-react";
+import { Send, Briefcase, Code, Users as UsersIcon, Rocket, ArrowLeft, Camera, CameraOff, Mic, MicOff, Volume2, VolumeX } from "lucide-react";
 import ReactMarkdown from "react-markdown";
-import { streamChat, ChatMessage } from "@/lib/ai-stream";
+import Character3D from "@/components/Character3D";
+import { streamChat, ChatMessage, speakWithElevenLabs, browserSpeak } from "@/lib/ai-stream";
 import { getSelectedCharacterId, getCharacterById } from "@/lib/characters";
 import { toast } from "sonner";
 import { useChatHistory } from "@/hooks/useChatHistory";
@@ -10,10 +11,10 @@ import { useChatHistory } from "@/hooks/useChatHistory";
 type InterviewType = { id: string; label: string; icon: React.ElementType; prompt: string; color: string };
 
 const interviewTypes: InterviewType[] = [
-  { id: "hr", label: "HR Interview", icon: Briefcase, prompt: "Ask me an HR/behavioral interview question. Evaluate my answer and give feedback.", color: "from-blue-500 to-cyan-400" },
-  { id: "technical", label: "Technical", icon: Code, prompt: "Ask me a technical interview question about programming, data structures, or algorithms. Evaluate my answer.", color: "from-green-500 to-emerald-400" },
-  { id: "behavioral", label: "Behavioral", icon: UsersIcon, prompt: "Ask me a behavioral interview question using the STAR method. Guide me to structure my answer.", color: "from-purple-500 to-pink-400" },
-  { id: "startup", label: "Startup", icon: Rocket, prompt: "Ask me a startup interview question about building products, growth, or entrepreneurship.", color: "from-orange-500 to-red-400" },
+  { id: "hr", label: "HR Interview", icon: Briefcase, prompt: "You are conducting an HR interview. Ask one behavioral question at a time, wait for the answer, evaluate it with a score out of 10, give feedback, then ask the next question.", color: "from-blue-500 to-cyan-400" },
+  { id: "technical", label: "Technical", icon: Code, prompt: "You are conducting a technical interview. Ask one programming/DSA question at a time, wait for the answer, evaluate it with a score out of 10, give feedback, then ask the next question.", color: "from-green-500 to-emerald-400" },
+  { id: "behavioral", label: "Behavioral", icon: UsersIcon, prompt: "You are conducting a behavioral interview using the STAR method. Ask one question at a time, wait for the answer, evaluate using STAR framework, score out of 10, then ask next.", color: "from-purple-500 to-pink-400" },
+  { id: "startup", label: "Startup", icon: Rocket, prompt: "You are conducting a startup interview about product thinking, growth, and entrepreneurship. Ask one question at a time, evaluate, score out of 10, then ask next.", color: "from-orange-500 to-red-400" },
 ];
 
 type DisplayMessage = { id: string; role: "user" | "assistant"; content: string };
@@ -32,6 +33,8 @@ export default function InterviewPage() {
   const [cameraError, setCameraError] = useState("");
   const [micEnabled, setMicEnabled] = useState(false);
   const [isRecording, setIsRecording] = useState(false);
+  const [ttsEnabled, setTtsEnabled] = useState(true);
+  const [isSpeaking, setIsSpeaking] = useState(false);
 
   const videoRef = useRef<HTMLVideoElement>(null);
   const mediaStreamRef = useRef<MediaStream | null>(null);
@@ -42,7 +45,18 @@ export default function InterviewPage() {
   const characterId = character?.id || "naruto";
   const { messages: savedMessages, saveMessage, loaded } = useChatHistory(characterId, mode);
 
-  // Speech recognition setup
+  const speak = useCallback(async (text: string) => {
+    if (!ttsEnabled || !text.trim()) return;
+    setIsSpeaking(true);
+    try {
+      await speakWithElevenLabs(text, character?.voiceId);
+    } catch {
+      browserSpeak(text);
+    } finally {
+      setIsSpeaking(false);
+    }
+  }, [ttsEnabled, character?.voiceId]);
+
   const startMic = useCallback(() => {
     const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
     if (!SpeechRecognition) {
@@ -57,12 +71,9 @@ export default function InterviewPage() {
 
     recognition.onresult = (event: any) => {
       let finalTranscript = "";
-      let interimTranscript = "";
       for (let i = event.resultIndex; i < event.results.length; i++) {
         if (event.results[i].isFinal) {
           finalTranscript += event.results[i][0].transcript;
-        } else {
-          interimTranscript += event.results[i][0].transcript;
         }
       }
       if (finalTranscript) {
@@ -71,14 +82,12 @@ export default function InterviewPage() {
     };
 
     recognition.onerror = (event: any) => {
-      console.error("Speech recognition error:", event.error);
       if (event.error !== "no-speech") {
         toast.error("Microphone error: " + event.error);
       }
     };
 
     recognition.onend = () => {
-      // Restart if still enabled
       if (micEnabled) {
         try { recognition.start(); } catch {}
       }
@@ -127,10 +136,7 @@ export default function InterviewPage() {
   }, []);
 
   useEffect(() => {
-    return () => {
-      stopCamera();
-      stopMic();
-    };
+    return () => { stopCamera(); stopMic(); };
   }, [stopCamera, stopMic]);
 
   useEffect(() => {
@@ -139,20 +145,15 @@ export default function InterviewPage() {
       setMessages(savedMessages);
       return;
     }
-    setMessages([{
-      id: "start",
-      role: "assistant",
-      content: `Welcome to **${selectedType.label} Practice**! 🎯\n\nI'll ask questions, evaluate your answer, and give clear feedback.\n\n${cameraEnabled ? "📸 Camera is on — I'll give delivery feedback too.\n\n" : ""}🎤 Use the mic button to speak your answers, or type them.\n\nType **Start** to begin.`
-    }]);
+    const welcomeMsg = `Welcome to **${selectedType.label} Practice**! 🎯\n\nI'm ${character?.name || "your mentor"} and I'll be your interviewer today.\n\n${cameraEnabled ? "📸 Camera is on — I can see you and will give delivery feedback.\n\n" : ""}🎤 Use the mic button to speak your answers, or type them.\n\nSay **"Start"** when you're ready for your first question!`;
+    setMessages([{ id: "start", role: "assistant", content: welcomeMsg }]);
   }, [selectedType, loaded, savedMessages]);
 
   const scrollToBottom = useCallback(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" });
   }, []);
 
-  useEffect(() => {
-    scrollToBottom();
-  }, [messages, scrollToBottom]);
+  useEffect(() => { scrollToBottom(); }, [messages, scrollToBottom]);
 
   const captureCameraFrame = () => {
     if (!cameraEnabled || !videoRef.current) return undefined;
@@ -187,7 +188,7 @@ export default function InterviewPage() {
     const cameraFrame = captureCameraFrame();
     const chatHistory: ChatMessage[] = newMessages.map((m) => ({ role: m.role, content: m.content }));
     const contextualMessages: ChatMessage[] = [
-      { role: "user", content: `Interview track: ${selectedType.label}. ${selectedType.prompt}` },
+      { role: "user", content: selectedType.prompt },
       ...chatHistory,
     ];
 
@@ -210,7 +211,10 @@ export default function InterviewPage() {
       },
       onDone: () => {
         setIsStreaming(false);
-        if (assistantContent) void saveMessage("assistant", assistantContent);
+        if (assistantContent) {
+          void saveMessage("assistant", assistantContent);
+          void speak(assistantContent);
+        }
       },
       onError: (error) => {
         setIsStreaming(false);
@@ -227,7 +231,40 @@ export default function InterviewPage() {
       <div className="min-h-screen px-6 pb-24 md:pt-20 pt-8">
         <div className="max-w-2xl mx-auto">
           <h1 className="text-2xl font-bold text-foreground mb-2">Interview Practice</h1>
-          <p className="text-muted-foreground mb-8">Choose an interview type. Enable camera for delivery coaching and mic to speak answers.</p>
+          <p className="text-muted-foreground mb-4 text-sm">
+            {character?.name || "Your mentor"} will interview you. Enable camera for visual feedback and mic to speak your answers.
+          </p>
+
+          {/* Character preview */}
+          <div className="flex justify-center mb-6">
+            {character && <Character3D character={character} size="md" />}
+          </div>
+
+          <div className="flex gap-3 justify-center mb-6">
+            <button
+              onClick={() => (cameraEnabled ? stopCamera() : startCamera())}
+              className={`inline-flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-medium transition-colors ${cameraEnabled ? "bg-primary text-primary-foreground" : "bg-secondary text-foreground"}`}
+            >
+              {cameraEnabled ? <Camera className="w-4 h-4" /> : <CameraOff className="w-4 h-4" />}
+              {cameraEnabled ? "Camera On" : "Enable Camera"}
+            </button>
+            <button
+              onClick={() => (micEnabled ? stopMic() : startMic())}
+              className={`inline-flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-medium transition-colors ${micEnabled ? "bg-destructive text-destructive-foreground" : "bg-secondary text-foreground"}`}
+            >
+              {micEnabled ? <Mic className="w-4 h-4" /> : <MicOff className="w-4 h-4" />}
+              {micEnabled ? "Mic On" : "Enable Mic"}
+            </button>
+          </div>
+
+          {/* Camera preview before starting */}
+          {cameraEnabled && (
+            <div className="surface-card p-2 mb-6 max-w-xs mx-auto">
+              <video ref={videoRef} autoPlay muted playsInline className="w-full aspect-video object-cover rounded-lg bg-secondary" style={{ transform: "scaleX(-1)" }} />
+            </div>
+          )}
+          {cameraError && <p className="text-xs text-destructive text-center mb-4">{cameraError}</p>}
+
           <div className="grid gap-4 sm:grid-cols-2">
             {interviewTypes.map((type, i) => (
               <motion.button
@@ -242,7 +279,7 @@ export default function InterviewPage() {
                   <type.icon className="w-6 h-6 text-white" />
                 </div>
                 <h3 className="font-semibold text-foreground">{type.label}</h3>
-                <p className="text-xs text-muted-foreground mt-1">Practice with AI feedback</p>
+                <p className="text-xs text-muted-foreground mt-1">Practice with AI feedback & voice</p>
               </motion.button>
             ))}
           </div>
@@ -258,38 +295,50 @@ export default function InterviewPage() {
         <button onClick={() => { setSelectedType(null); setMessages([]); stopCamera(); stopMic(); }} className="p-2 hover:bg-secondary rounded-lg transition-colors">
           <ArrowLeft className="w-4 h-4 text-muted-foreground" />
         </button>
-        <div className="flex-1">
-          <h1 className="font-semibold text-foreground text-sm">{selectedType.label} Practice</h1>
-          <p className="text-xs text-muted-foreground">With {character?.name || "XOVA"} · {answeredCount} answers</p>
+
+        {/* Interviewer avatar */}
+        <div className="flex-shrink-0">
+          {character && (
+            <Character3D
+              character={character}
+              isSpeaking={isSpeaking}
+              isThinking={isStreaming && !isSpeaking}
+              size="sm"
+            />
+          )}
+        </div>
+
+        <div className="flex-1 min-w-0">
+          <h1 className="font-semibold text-foreground text-sm truncate">{selectedType.label} — {character?.name || "XOVA"}</h1>
+          <p className="text-xs text-muted-foreground">{answeredCount} answers · {progressPercent}% complete</p>
         </div>
         <div className="flex gap-1.5">
           <button
+            onClick={() => setTtsEnabled(!ttsEnabled)}
+            className={`p-1.5 rounded-lg text-xs transition-colors ${ttsEnabled ? "bg-primary/10 text-primary" : "bg-secondary text-muted-foreground"}`}
+          >
+            {ttsEnabled ? <Volume2 className="w-3.5 h-3.5" /> : <VolumeX className="w-3.5 h-3.5" />}
+          </button>
+          <button
             onClick={() => (micEnabled ? stopMic() : startMic())}
-            className={`inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-medium transition-colors ${micEnabled ? "bg-destructive text-destructive-foreground" : "bg-secondary text-foreground"}`}
+            className={`p-1.5 rounded-lg text-xs transition-colors ${micEnabled ? "bg-destructive text-destructive-foreground" : "bg-secondary text-foreground"}`}
           >
             {micEnabled ? <Mic className="w-3.5 h-3.5" /> : <MicOff className="w-3.5 h-3.5" />}
-            {micEnabled ? "Mic on" : "Mic"}
           </button>
           <button
             onClick={() => (cameraEnabled ? stopCamera() : startCamera())}
-            className={`inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-medium transition-colors ${cameraEnabled ? "bg-primary text-primary-foreground" : "bg-secondary text-foreground"}`}
+            className={`p-1.5 rounded-lg text-xs transition-colors ${cameraEnabled ? "bg-primary text-primary-foreground" : "bg-secondary text-foreground"}`}
           >
             {cameraEnabled ? <Camera className="w-3.5 h-3.5" /> : <CameraOff className="w-3.5 h-3.5" />}
-            {cameraEnabled ? "Cam on" : "Cam"}
           </button>
         </div>
       </div>
 
       {/* Progress */}
-      <div className="px-4 py-2.5 border-b border-border bg-card/40">
-        <div className="flex items-center justify-between mb-1">
-          <span className="text-xs text-muted-foreground">Interview progress</span>
-          <span className="text-xs text-foreground font-medium">{progressPercent}%</span>
-        </div>
+      <div className="px-4 py-2 border-b border-border bg-card/40">
         <div className="w-full h-1.5 bg-secondary rounded-full">
           <motion.div className="h-full bg-primary rounded-full" animate={{ width: `${progressPercent}%` }} />
         </div>
-        {cameraError && <p className="text-xs text-destructive mt-1">{cameraError}</p>}
       </div>
 
       {/* Chat + Camera */}
@@ -297,28 +346,15 @@ export default function InterviewPage() {
         {/* Camera preview */}
         {cameraEnabled && (
           <div className="surface-card p-2 mb-3 max-w-sm mx-auto">
-            <video
-              ref={videoRef}
-              autoPlay
-              muted
-              playsInline
-              className="w-full aspect-video object-cover rounded-lg bg-secondary"
-              style={{ transform: "scaleX(-1)" }}
-            />
-            <p className="text-[10px] text-muted-foreground text-center mt-1">Your camera feed — AI analyzes snapshots with each answer</p>
+            <video ref={videoRef} autoPlay muted playsInline className="w-full aspect-video object-cover rounded-lg bg-secondary" style={{ transform: "scaleX(-1)" }} />
+            <p className="text-[10px] text-muted-foreground text-center mt-1">Your camera — AI sees snapshots with each answer</p>
           </div>
         )}
 
-        {/* Hidden video element when camera is on but outside view */}
         {!cameraEnabled && <video ref={videoRef} className="hidden" />}
 
-        {/* Mic recording indicator */}
         {isRecording && (
-          <motion.div
-            className="flex items-center justify-center gap-2 py-2"
-            animate={{ opacity: [1, 0.5, 1] }}
-            transition={{ duration: 1.5, repeat: Infinity }}
-          >
+          <motion.div className="flex items-center justify-center gap-2 py-2" animate={{ opacity: [1, 0.5, 1] }} transition={{ duration: 1.5, repeat: Infinity }}>
             <div className="w-2 h-2 rounded-full bg-destructive" />
             <span className="text-xs text-muted-foreground">Listening... speak your answer</span>
           </motion.div>
@@ -326,7 +362,18 @@ export default function InterviewPage() {
 
         <AnimatePresence mode="popLayout">
           {messages.map((msg) => (
-            <motion.div key={msg.id} initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className={`flex ${msg.role === "user" ? "justify-end" : "justify-start"}`}>
+            <motion.div key={msg.id} initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className={`flex ${msg.role === "user" ? "justify-end" : "justify-start gap-2"}`}>
+              {msg.role === "assistant" && character && (
+                <div className="w-8 h-8 rounded-full overflow-hidden flex-shrink-0 mt-1 ring-1 ring-primary/20">
+                  {character.image ? (
+                    <img src={character.image} alt={character.name} className="w-full h-full object-cover" />
+                  ) : (
+                    <div className={`w-full h-full bg-gradient-to-br ${character.color} flex items-center justify-center`}>
+                      <span className="text-xs font-bold text-foreground">{character.name.charAt(0)}</span>
+                    </div>
+                  )}
+                </div>
+              )}
               <div className={`max-w-[80%] md:max-w-[65%] px-4 py-3 rounded-2xl text-sm leading-relaxed ${msg.role === "user" ? "bg-primary text-primary-foreground rounded-br-md" : "surface-card text-card-foreground rounded-bl-md"}`}>
                 {msg.role === "assistant" ? (
                   <div className="prose prose-sm prose-invert max-w-none [&>p]:mb-2 [&_strong]:text-foreground [&_code]:bg-secondary [&_code]:px-1 [&_code]:rounded">

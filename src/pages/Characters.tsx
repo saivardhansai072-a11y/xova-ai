@@ -1,6 +1,6 @@
-import { useState } from "react";
+import { useState, useRef } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { Check, Plus, Trash2, Sparkles, ArrowRight, X } from "lucide-react";
+import { Check, Plus, Trash2, Sparkles, ArrowRight, X, Upload, Loader2 } from "lucide-react";
 import Character3D from "@/components/Character3D";
 import {
   defaultCharacters,
@@ -12,6 +12,7 @@ import {
   AICharacter,
   CustomCharacterData,
 } from "@/lib/characters";
+import { useTheme } from "@/contexts/ThemeContext";
 import { toast } from "sonner";
 import { useNavigate } from "react-router-dom";
 
@@ -50,13 +51,17 @@ function CharacterCard({
     >
       <div className={`absolute inset-0 bg-gradient-to-br ${character.color} opacity-0 group-hover:opacity-5 transition-opacity`} />
 
-      {/* 3D Character Preview */}
       <div className="relative flex justify-center mb-3">
         <Character3D character={character} size="sm" />
       </div>
 
       <h3 className="font-semibold text-foreground text-center text-sm">{character.name}</h3>
       <p className="text-xs text-muted-foreground text-center mt-0.5">{character.anime}</p>
+      {character.gender && (
+        <p className="text-[10px] text-muted-foreground text-center mt-0.5">
+          {character.gender === "male" ? "♂ Male" : "♀ Female"} voice
+        </p>
+      )}
 
       {isSelected && (
         <motion.div
@@ -82,24 +87,77 @@ function CharacterCard({
 
 export default function CharactersPage() {
   const navigate = useNavigate();
+  const { refreshTheme } = useTheme();
   const [selectedId, setSelectedId] = useState(getSelectedCharacterId());
   const [customChars, setCustomChars] = useState(getCustomCharacters());
   const [showCreator, setShowCreator] = useState(false);
-  const [form, setForm] = useState<CustomCharacterData>({
-    name: "", anime: "", personality: "", greeting: "", color: colorOptions[0].value,
+  const [form, setForm] = useState<CustomCharacterData & { gender: "male" | "female" }>({
+    name: "", anime: "", personality: "", greeting: "", color: colorOptions[0].value, image: "", gender: "male",
   });
+  const [convertingImage, setConvertingImage] = useState(false);
+  const [previewImage, setPreviewImage] = useState<string>("");
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const handleSelect = (id: string) => {
     setSelectedId(id);
     setSelectedCharacterId(id);
-    toast.success("Character selected! Go to Mentor or Chat to start talking.");
+    refreshTheme();
+    toast.success("Character selected! Theme updated across the app.");
   };
 
   const handleDelete = (id: string) => {
     deleteCustomCharacter(id);
     setCustomChars(getCustomCharacters());
-    if (selectedId === id) { setSelectedId("goku"); setSelectedCharacterId("goku"); }
+    if (selectedId === id) { setSelectedId("goku"); setSelectedCharacterId("goku"); refreshTheme(); }
     toast.success("Character deleted");
+  };
+
+  const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    // Convert to base64
+    const reader = new FileReader();
+    reader.onload = async (ev) => {
+      const base64 = ev.target?.result as string;
+      setPreviewImage(base64);
+
+      // Convert to anime style
+      setConvertingImage(true);
+      try {
+        const response = await fetch(
+          `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/anime-convert`,
+          {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              apikey: import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY,
+              Authorization: `Bearer ${import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY}`,
+            },
+            body: JSON.stringify({ imageBase64: base64 }),
+          }
+        );
+
+        if (!response.ok) {
+          const errData = await response.json().catch(() => ({}));
+          throw new Error(errData.error || "Conversion failed");
+        }
+
+        const data = await response.json();
+        if (data.animeImage) {
+          setForm((prev) => ({ ...prev, image: data.animeImage }));
+          setPreviewImage(data.animeImage);
+          toast.success("Photo converted to anime style! ✨");
+        }
+      } catch (err) {
+        console.error("Anime conversion error:", err);
+        toast.error("Couldn't convert to anime. Using original photo.");
+        setForm((prev) => ({ ...prev, image: base64 }));
+      } finally {
+        setConvertingImage(false);
+      }
+    };
+    reader.readAsDataURL(file);
   };
 
   const handleCreate = () => {
@@ -109,7 +167,8 @@ export default function CharactersPage() {
     }
     saveCustomCharacter(form);
     setCustomChars(getCustomCharacters());
-    setForm({ name: "", anime: "", personality: "", greeting: "", color: colorOptions[0].value });
+    setForm({ name: "", anime: "", personality: "", greeting: "", color: colorOptions[0].value, image: "", gender: "male" });
+    setPreviewImage("");
     setShowCreator(false);
     toast.success("Custom character created!");
   };
@@ -136,7 +195,7 @@ export default function CharactersPage() {
           </div>
         </div>
         <p className="text-muted-foreground text-sm mb-8">
-          Each character has unique personality & emotions. Drag to rotate!
+          Each character has unique personality, voice & theme. Select to change the entire app look!
         </p>
 
         {/* Custom Creator */}
@@ -149,6 +208,27 @@ export default function CharactersPage() {
                   <h2 className="font-semibold text-foreground">Create Custom Character</h2>
                 </div>
                 <div className="space-y-4">
+                  {/* Image upload with anime conversion */}
+                  <div>
+                    <label className="text-xs text-muted-foreground mb-1 block">Upload Photo (converts to anime style)</label>
+                    <input ref={fileInputRef} type="file" accept="image/*" onChange={handleImageUpload} className="hidden" />
+                    <div className="flex items-center gap-4">
+                      <button
+                        onClick={() => fileInputRef.current?.click()}
+                        disabled={convertingImage}
+                        className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-secondary text-foreground text-sm hover:bg-secondary/80 disabled:opacity-50"
+                      >
+                        {convertingImage ? <Loader2 className="w-4 h-4 animate-spin" /> : <Upload className="w-4 h-4" />}
+                        {convertingImage ? "Converting to anime..." : "Upload Photo"}
+                      </button>
+                      {previewImage && (
+                        <div className="w-16 h-16 rounded-full overflow-hidden ring-2 ring-primary/30">
+                          <img src={previewImage} alt="Preview" className="w-full h-full object-cover" />
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
                   <div className="grid grid-cols-2 gap-4">
                     <div>
                       <label className="text-xs text-muted-foreground mb-1 block">Name *</label>
@@ -159,6 +239,27 @@ export default function CharactersPage() {
                       <input value={form.anime} onChange={(e) => setForm({ ...form, anime: e.target.value })} placeholder="e.g. Custom" className="w-full bg-secondary rounded-lg px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/30" />
                     </div>
                   </div>
+
+                  {/* Gender for voice */}
+                  <div>
+                    <label className="text-xs text-muted-foreground mb-1 block">Voice Gender</label>
+                    <div className="flex gap-3">
+                      {(["male", "female"] as const).map((g) => (
+                        <button
+                          key={g}
+                          onClick={() => setForm({ ...form, gender: g })}
+                          className={`px-4 py-2 rounded-lg text-sm font-medium transition-all ${
+                            form.gender === g
+                              ? "bg-primary text-primary-foreground"
+                              : "bg-secondary text-muted-foreground hover:text-foreground"
+                          }`}
+                        >
+                          {g === "male" ? "♂ Male Voice" : "♀ Female Voice"}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
                   <div>
                     <label className="text-xs text-muted-foreground mb-1 block">Color Theme</label>
                     <div className="flex gap-2">

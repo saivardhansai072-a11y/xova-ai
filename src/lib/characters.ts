@@ -16,6 +16,7 @@ export type AICharacter = {
   greeting: string;
   voiceId?: string;
   isCustom?: boolean;
+  gender?: "male" | "female";
 };
 
 export const defaultCharacters: AICharacter[] = [
@@ -26,7 +27,8 @@ export const defaultCharacters: AICharacter[] = [
     image: gokuImg,
     color: "from-orange-500 to-yellow-400",
     glowColor: "rgba(249, 115, 22, 0.4)",
-    voiceId: "JBFqnCBsd6RMkjVDRZzb",
+    voiceId: "N2lVS1w4EtoT3dr4eOWO", // Callum - calm confident male
+    gender: "male",
     personality: `You are Goku from Dragon Ball Z acting as an AI mentor. You are enthusiastic, energetic, and always excited about learning new things — just like training!
 Key traits:
 - You compare learning to training and getting stronger
@@ -45,7 +47,8 @@ Key traits:
     image: narutoImg,
     color: "from-orange-400 to-blue-500",
     glowColor: "rgba(59, 130, 246, 0.4)",
-    voiceId: "TX3LPaxmHKxFdv7VOQHJ",
+    voiceId: "TX3LPaxmHKxFdv7VOQHJ", // Liam - warm energetic male
+    gender: "male",
     personality: `You are Naruto Uzumaki acting as an AI mentor. You never give up and believe in every student!
 Key traits:
 - You say "Believe it!" and "Dattebayo!" occasionally
@@ -64,7 +67,8 @@ Key traits:
     image: luffyImg,
     color: "from-red-500 to-yellow-500",
     glowColor: "rgba(239, 68, 68, 0.4)",
-    voiceId: "pqHfZKP75CvOlQylNhV4",
+    voiceId: "IKne3meq5aSn9XLyUdCD", // Charlie - adventurous male
+    gender: "male",
     personality: `You are Monkey D. Luffy from One Piece acting as an AI mentor. You're adventurous and turn everything into an exciting journey!
 Key traits:
 - You treat every learning topic as a new adventure on the Grand Line
@@ -83,7 +87,8 @@ Key traits:
     image: hinataImg,
     color: "from-indigo-400 to-purple-400",
     glowColor: "rgba(129, 140, 248, 0.4)",
-    voiceId: "XrExE9yKIg1WjnnlVkGX",
+    voiceId: "XrExE9yKIg1WjnnlVkGX", // Matilda - soft gentle female
+    gender: "female",
     personality: `You are Hinata Hyuga from Naruto acting as an AI mentor. You're gentle, patient, and deeply encouraging!
 Key traits:
 - You're soft-spoken but incredibly supportive and patient
@@ -102,7 +107,8 @@ Key traits:
     image: mikasaImg,
     color: "from-gray-600 to-red-700",
     glowColor: "rgba(185, 28, 28, 0.4)",
-    voiceId: "FGY2WhTYpPnrIDTdsKH5",
+    voiceId: "FGY2WhTYpPnrIDTdsKH5", // Laura - strong focused female
+    gender: "female",
     personality: `You are Mikasa Ackerman from Attack on Titan acting as an AI mentor. You're focused, disciplined, and fiercely protective of your student's success!
 Key traits:
 - You're serious, focused, and no-nonsense in teaching
@@ -121,7 +127,8 @@ Key traits:
     image: suzumeImg,
     color: "from-pink-400 to-sky-400",
     glowColor: "rgba(244, 114, 182, 0.4)",
-    voiceId: "EXAVITQu4vr4xnSDxMaL",
+    voiceId: "EXAVITQu4vr4xnSDxMaL", // Sarah - warm curious female
+    gender: "female",
     personality: `You are Suzume from Suzume no Tojimari acting as an AI mentor. You're brave, curious, and full of wonder!
 Key traits:
 - You're warm, curious, and see beauty in learning new things
@@ -141,6 +148,8 @@ export type CustomCharacterData = {
   personality: string;
   greeting: string;
   color: string;
+  image?: string;
+  gender?: "male" | "female";
 };
 
 export function getCharacterById(id: string): AICharacter | undefined {
@@ -158,14 +167,16 @@ export function getCustomCharacters(): AICharacter[] {
 
 export function saveCustomCharacter(data: CustomCharacterData): AICharacter {
   const customs = getCustomCharacters();
+  const isMale = data.gender === "male";
   const char: AICharacter = {
     id: `custom-${Date.now()}`,
     name: data.name,
     anime: data.anime || "Custom",
-    image: "",
+    image: data.image || "",
     color: data.color || "from-emerald-400 to-cyan-500",
     glowColor: "rgba(16, 185, 129, 0.4)",
-    voiceId: "nPczCjzI2devNBz1zQrb",
+    voiceId: isMale ? "nPczCjzI2devNBz1zQrb" : "cgSgspJ2msm6clMCkdW9", // Brian (male) or Jessica (female)
+    gender: data.gender || "male",
     personality: data.personality,
     greeting: data.greeting,
     isCustom: true,
