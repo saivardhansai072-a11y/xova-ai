@@ -4,13 +4,18 @@ import { Link } from "react-router-dom";
 import {
   MessageCircle, Brain, Users, Briefcase, Compass, Rocket,
   Trophy, Target, Flame, Star, ChevronRight, Zap, TrendingUp,
-  CheckCircle2, Clock
+  CheckCircle2, Clock, Mic, Code
 } from "lucide-react";
 import { getSelectedCharacterId, getCharacterById } from "@/lib/characters";
 import { useAuth } from "@/contexts/AuthContext";
 import { useQuizProgress } from "@/hooks/useQuizProgress";
 import { useProfile } from "@/hooks/useProfile";
 import { useActivityProgress } from "@/hooks/useActivityProgress";
+import { getDailyMissions, getMissionProgress } from "@/lib/daily-missions";
+
+const iconMap: Record<string, React.ElementType> = {
+  Brain, Briefcase, MessageCircle, Compass, Rocket, Mic, Code,
+};
 
 export default function DashboardPage() {
   const { user } = useAuth();
@@ -33,7 +38,6 @@ export default function DashboardPage() {
     if (!profile) return;
     const today = new Date().toISOString().split("T")[0];
     const lastVisit = profile.last_visit;
-
     if (lastVisit === today) {
       setStreak(profile.streak);
     } else {
@@ -46,12 +50,26 @@ export default function DashboardPage() {
 
   const displayName = profile?.display_name || user?.email?.split("@")[0] || "Learner";
 
-  const missions = [
-    { id: "1", title: "Solve 5 Aptitude Questions", description: "Sharpen your mind", icon: Brain, target: 5, current: Math.min(totalQuestions, 5), link: "/aptitude", color: "text-primary" },
-    { id: "2", title: "Practice 1 Interview Question", description: "Prepare for success", icon: Briefcase, target: 1, current: Math.min(activity.interviewTurns, 1), link: "/interview", color: "text-yellow-400" },
-    { id: "3", title: "Chat with Your Mentor", description: "Learn something new", icon: MessageCircle, target: 1, current: Math.min(activity.chatTurns, 1), link: "/chat", color: "text-green-400" },
-    { id: "4", title: "Explore a Career Path", description: "Plan your future", icon: Compass, target: 1, current: 0, link: "/career", color: "text-purple-400" },
-  ];
+  // Daily missions with refresh
+  const dailyMissions = getDailyMissions();
+  const missionProgress = getMissionProgress();
+
+  const activityMap: Record<string, number> = {
+    aptitude: totalQuestions,
+    interview: activity.interviewTurns,
+    chat: activity.chatTurns,
+    career: 0,
+    mentor: 0,
+    startup: 0,
+  };
+
+  const missions = dailyMissions.map(m => ({
+    ...m,
+    current: Math.min(missionProgress[m.trackKey] || activityMap[m.trackKey] || 0, m.target),
+    IconComponent: iconMap[m.icon] || Brain,
+  }));
+
+  const completedCount = missions.filter(m => m.current >= m.target).length;
 
   const quickAccess = [
     { icon: MessageCircle, label: "AI Chat", to: "/chat", color: "from-blue-500 to-cyan-400" },
@@ -100,9 +118,12 @@ export default function DashboardPage() {
         </motion.div>
 
         <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.2 }} className="mb-8">
-          <div className="flex items-center gap-2 mb-4">
-            <Star className="w-5 h-5 text-yellow-400" />
-            <h2 className="text-lg font-semibold text-foreground">Daily Missions</h2>
+          <div className="flex items-center justify-between mb-4">
+            <div className="flex items-center gap-2">
+              <Star className="w-5 h-5 text-yellow-400" />
+              <h2 className="text-lg font-semibold text-foreground">Daily Missions</h2>
+            </div>
+            <span className="text-xs text-muted-foreground">{completedCount}/{missions.length} done · Refreshes at 12 PM</span>
           </div>
           <div className="space-y-3">
             {missions.map((mission) => {
@@ -110,7 +131,7 @@ export default function DashboardPage() {
               return (
                 <Link key={mission.id} to={mission.link} className="surface-card p-4 flex items-center gap-4 hover:border-primary/30 transition-colors block">
                   <div className={`w-10 h-10 rounded-xl flex items-center justify-center ${completed ? "bg-green-500/10" : "bg-secondary"}`}>
-                    {completed ? <CheckCircle2 className="w-5 h-5 text-green-400" /> : <mission.icon className={`w-5 h-5 ${mission.color}`} />}
+                    {completed ? <CheckCircle2 className="w-5 h-5 text-green-400" /> : <mission.IconComponent className={`w-5 h-5 ${mission.color}`} />}
                   </div>
                   <div className="flex-1">
                     <h3 className={`text-sm font-medium ${completed ? "text-muted-foreground line-through" : "text-foreground"}`}>{mission.title}</h3>
