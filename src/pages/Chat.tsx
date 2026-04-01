@@ -2,8 +2,9 @@ import { useState, useRef, useEffect, useCallback, useMemo } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { Send, Volume2, VolumeX, Trash2, Users } from "lucide-react";
 import ReactMarkdown from "react-markdown";
-import { MentorState } from "@/components/MentorAvatar";
-import { streamChat, ChatMessage, speakWithElevenLabs, browserSpeak } from "@/lib/ai-stream";
+import AnimatedAvatar from "@/components/AnimatedAvatar";
+import { streamChat, ChatMessage } from "@/lib/ai-stream";
+import { speakText, stopTTS, onTTSAudioChange } from "@/lib/tts-player";
 import { getSelectedCharacterId, getCharacterById, AICharacter } from "@/lib/characters";
 import { Link } from "react-router-dom";
 import { toast } from "sonner";
@@ -22,70 +23,55 @@ export default function ChatPage() {
 
   const [messages, setMessages] = useState<DisplayMessage[]>([]);
   const [input, setInput] = useState("");
-  const [mentorState, setMentorState] = useState<MentorState>("idle");
   const [isStreaming, setIsStreaming] = useState(false);
-  const [ttsEnabled, setTtsEnabled] = useState(false);
+  const [ttsEnabled, setTtsEnabled] = useState(true);
+  const [avatarState, setAvatarState] = useState<"idle" | "speaking" | "listening" | "thinking">("idle");
+  const [ttsAudio, setTtsAudio] = useState<HTMLAudioElement | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
+    const unsub = onTTSAudioChange((audio) => {
+      setTtsAudio(audio);
+      setAvatarState(audio ? "speaking" : "idle");
+    });
+    return () => { unsub(); stopTTS(); };
+  }, []);
+
+  useEffect(() => {
     if (!loaded) return;
-
-    if (savedMessages.length > 0) {
-      setMessages(savedMessages);
-      return;
-    }
-
-    setMessages([{
-      id: "welcome",
-      role: "assistant",
-      content: character?.greeting || "Hello! I'm XOVA. What would you like to learn today?",
-    }]);
+    if (savedMessages.length > 0) { setMessages(savedMessages); return; }
+    setMessages([{ id: "welcome", role: "assistant", content: character?.greeting || "Hello! I'm XOVA. What would you like to learn today?" }]);
   }, [loaded, savedMessages, character?.greeting]);
 
   const scrollToBottom = useCallback(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" });
   }, []);
 
-  useEffect(() => {
-    scrollToBottom();
-  }, [messages, scrollToBottom]);
-
-  const speak = useCallback(async (text: string) => {
-    if (!ttsEnabled || !text.trim()) return;
-
-    setMentorState("explaining");
-    try {
-      await speakWithElevenLabs(text, character?.voiceId);
-    } catch {
-      browserSpeak(text);
-    } finally {
-      setMentorState("idle");
-    }
-  }, [ttsEnabled, character?.voiceId]);
+  useEffect(() => { scrollToBottom(); }, [messages, scrollToBottom]);
 
   const handleSend = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!input.trim() || isStreaming) return;
 
+    stopTTS();
     const userMsg: DisplayMessage = { id: Date.now().toString(), role: "user", content: input.trim() };
     const newMessages = [...messages, userMsg];
     setMessages(newMessages);
     setInput("");
     setIsStreaming(true);
-    setMentorState("listening");
+    setAvatarState("listening");
 
     void saveMessage("user", userMsg.content);
 
     const chatHistory: ChatMessage[] = newMessages.map((m) => ({ role: m.role, content: m.content }));
     let assistantContent = "";
 
-    setTimeout(() => setMentorState("thinking"), 400);
+    setTimeout(() => setAvatarState("thinking"), 400);
 
     await streamChat({
       messages: chatHistory,
       characterPersonality: character?.personality,
       onDelta: (chunk) => {
-        setMentorState("explaining");
         assistantContent += chunk;
         setMessages((prev) => {
           const last = prev[prev.length - 1];
@@ -98,46 +84,38 @@ export default function ChatPage() {
       onDone: () => {
         setIsStreaming(false);
         if (assistantContent) {
-          void speak(assistantContent);
           void saveMessage("assistant", assistantContent);
+          if (ttsEnabled) void speakText(assistantContent, character?.voiceId);
+          else setAvatarState("idle");
         } else {
-          setMentorState("idle");
+          setAvatarState("idle");
         }
       },
       onError: (error) => {
         setIsStreaming(false);
-        setMentorState("idle");
+        setAvatarState("idle");
         toast.error(error);
       },
     });
   };
 
   const clearChat = async () => {
+    stopTTS();
     await clearHistory();
-    setMessages([{
-      id: "welcome",
-      role: "assistant",
-      content: character?.greeting || "Chat cleared! What would you like to learn?",
-    }]);
+    setMessages([{ id: "welcome", role: "assistant", content: character?.greeting || "Chat cleared! What would you like to learn?" }]);
   };
 
   return (
     <div className="flex flex-col h-screen md:pt-14 pb-20 md:pb-0">
       <div className="flex items-center justify-between px-4 py-3 border-b border-border bg-card/50 backdrop-blur-md">
         <div className="flex items-center gap-3">
-          <div className="w-10 h-10 rounded-full overflow-hidden ring-2 ring-primary/30 flex-shrink-0">
-            {character?.image ? (
-              <img src={character.image} alt={character.name} className="w-full h-full object-cover" />
-            ) : (
-              <div className={`w-full h-full bg-gradient-to-br ${character?.color || "from-primary to-accent"} flex items-center justify-center`}>
-                <span className="text-sm font-bold text-foreground">{character?.name?.charAt(0) || "X"}</span>
-              </div>
-            )}
-          </div>
+          {character && (
+            <AnimatedAvatar character={character} state={avatarState} size="sm" audioElement={ttsAudio} />
+          )}
           <div>
             <h1 className="font-semibold text-foreground text-sm">{character?.name || "XOVA"}</h1>
             <p className="text-xs text-muted-foreground capitalize">
-              {isStreaming ? mentorState : "Online"} · {character?.anime || "AI Mentor"}
+              {isStreaming ? avatarState : "Online"} · {character?.anime || "AI Mentor"}
             </p>
           </div>
         </div>
@@ -146,10 +124,7 @@ export default function ChatPage() {
             <Users className="w-4 h-4" />
           </Link>
           <button
-            onClick={() => {
-              setTtsEnabled(!ttsEnabled);
-              if (ttsEnabled) window.speechSynthesis?.cancel();
-            }}
+            onClick={() => { setTtsEnabled(!ttsEnabled); if (ttsEnabled) stopTTS(); }}
             className="p-2 rounded-lg hover:bg-secondary text-muted-foreground hover:text-foreground transition-colors"
           >
             {ttsEnabled ? <Volume2 className="w-4 h-4" /> : <VolumeX className="w-4 h-4" />}
@@ -171,7 +146,7 @@ export default function ChatPage() {
               className={`flex ${msg.role === "user" ? "justify-end" : "justify-start"}`}
             >
               {msg.role === "assistant" && (
-                <div className="w-7 h-7 rounded-full overflow-hidden mr-2 flex-shrink-0 mt-1">
+                <div className="w-7 h-7 rounded-full overflow-hidden mr-2 flex-shrink-0 mt-1 ring-1 ring-primary/20">
                   {character?.image ? (
                     <img src={character.image} alt="AI avatar" className="w-full h-full object-cover" />
                   ) : (
@@ -182,9 +157,7 @@ export default function ChatPage() {
                 </div>
               )}
               <div className={`max-w-[80%] md:max-w-[65%] px-4 py-3 rounded-2xl text-sm leading-relaxed ${
-                msg.role === "user"
-                  ? "bg-primary text-primary-foreground rounded-br-md"
-                  : "surface-card text-card-foreground rounded-bl-md"
+                msg.role === "user" ? "bg-primary text-primary-foreground rounded-br-md" : "surface-card text-card-foreground rounded-bl-md"
               }`}>
                 {msg.role === "assistant" ? (
                   <div className="prose prose-sm prose-invert max-w-none [&>p]:mb-2 [&>ul]:mb-2 [&>ol]:mb-2 [&_strong]:text-foreground [&_code]:bg-secondary [&_code]:px-1 [&_code]:rounded [&_pre]:bg-secondary [&_pre]:p-3 [&_pre]:rounded-lg">
@@ -196,7 +169,7 @@ export default function ChatPage() {
           ))}
         </AnimatePresence>
 
-        {isStreaming && mentorState === "thinking" && (
+        {isStreaming && avatarState === "thinking" && (
           <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="flex justify-start">
             <div className="w-7 h-7 mr-2 flex-shrink-0" />
             <div className="surface-card px-4 py-3 rounded-2xl rounded-bl-md flex gap-1">

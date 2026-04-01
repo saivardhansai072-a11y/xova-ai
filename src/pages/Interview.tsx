@@ -1,9 +1,10 @@
 import { useState, useRef, useEffect, useCallback, useMemo } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { Send, Briefcase, Code, Users as UsersIcon, Rocket, ArrowLeft, Camera, CameraOff, Mic, MicOff, Volume2, VolumeX } from "lucide-react";
+import { Send, Briefcase, Code, Users as UsersIcon, Rocket, ArrowLeft, Camera, CameraOff, Mic, MicOff, Volume2, VolumeX, Video, StopCircle } from "lucide-react";
 import ReactMarkdown from "react-markdown";
-import Character3D from "@/components/Character3D";
-import { streamChat, ChatMessage, speakWithElevenLabs, browserSpeak } from "@/lib/ai-stream";
+import AnimatedAvatar from "@/components/AnimatedAvatar";
+import { streamChat, ChatMessage } from "@/lib/ai-stream";
+import { speakText, stopTTS, onTTSAudioChange } from "@/lib/tts-player";
 import { getSelectedCharacterId, getCharacterById } from "@/lib/characters";
 import { toast } from "sonner";
 import { useChatHistory } from "@/hooks/useChatHistory";
@@ -34,65 +35,46 @@ export default function InterviewPage() {
   const [micEnabled, setMicEnabled] = useState(false);
   const [isRecording, setIsRecording] = useState(false);
   const [ttsEnabled, setTtsEnabled] = useState(true);
-  const [isSpeaking, setIsSpeaking] = useState(false);
+  const [avatarState, setAvatarState] = useState<"idle" | "speaking" | "listening" | "thinking">("idle");
+  const [ttsAudio, setTtsAudio] = useState<HTMLAudioElement | null>(null);
+  const [isRecordingVideo, setIsRecordingVideo] = useState(false);
 
   const videoRef = useRef<HTMLVideoElement>(null);
   const mediaStreamRef = useRef<MediaStream | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const recognitionRef = useRef<any>(null);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const recordedChunksRef = useRef<Blob[]>([]);
 
   const mode = selectedType ? `interview-${selectedType.id}` : "interview-general";
   const characterId = character?.id || "naruto";
   const { messages: savedMessages, saveMessage, loaded } = useChatHistory(characterId, mode);
 
-  const speak = useCallback(async (text: string) => {
-    if (!ttsEnabled || !text.trim()) return;
-    setIsSpeaking(true);
-    try {
-      await speakWithElevenLabs(text, character?.voiceId);
-    } catch {
-      browserSpeak(text);
-    } finally {
-      setIsSpeaking(false);
-    }
-  }, [ttsEnabled, character?.voiceId]);
+  // TTS audio tracking
+  useEffect(() => {
+    const unsub = onTTSAudioChange((audio) => {
+      setTtsAudio(audio);
+      setAvatarState(audio ? "speaking" : "idle");
+    });
+    return () => { unsub(); stopTTS(); };
+  }, []);
 
   const startMic = useCallback(() => {
-    const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
-    if (!SpeechRecognition) {
-      toast.error("Speech recognition not supported in this browser.");
-      return;
-    }
-
-    const recognition = new SpeechRecognition();
+    const SR = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+    if (!SR) { toast.error("Speech recognition not supported."); return; }
+    const recognition = new SR();
     recognition.continuous = true;
     recognition.interimResults = true;
     recognition.lang = "en-US";
-
     recognition.onresult = (event: any) => {
       let finalTranscript = "";
       for (let i = event.resultIndex; i < event.results.length; i++) {
-        if (event.results[i].isFinal) {
-          finalTranscript += event.results[i][0].transcript;
-        }
+        if (event.results[i].isFinal) finalTranscript += event.results[i][0].transcript;
       }
-      if (finalTranscript) {
-        setInput((prev) => (prev + " " + finalTranscript).trim());
-      }
+      if (finalTranscript) setInput(prev => (prev + " " + finalTranscript).trim());
     };
-
-    recognition.onerror = (event: any) => {
-      if (event.error !== "no-speech") {
-        toast.error("Microphone error: " + event.error);
-      }
-    };
-
-    recognition.onend = () => {
-      if (micEnabled) {
-        try { recognition.start(); } catch {}
-      }
-    };
-
+    recognition.onerror = (e: any) => { if (e.error !== "no-speech") toast.error("Mic error: " + e.error); };
+    recognition.onend = () => { if (micEnabled) try { recognition.start(); } catch {} };
     recognitionRef.current = recognition;
     recognition.start();
     setMicEnabled(true);
@@ -100,17 +82,13 @@ export default function InterviewPage() {
   }, [micEnabled]);
 
   const stopMic = useCallback(() => {
-    if (recognitionRef.current) {
-      recognitionRef.current.onend = null;
-      recognitionRef.current.stop();
-      recognitionRef.current = null;
-    }
+    if (recognitionRef.current) { recognitionRef.current.onend = null; recognitionRef.current.stop(); recognitionRef.current = null; }
     setMicEnabled(false);
     setIsRecording(false);
   }, []);
 
   const stopCamera = useCallback(() => {
-    mediaStreamRef.current?.getTracks().forEach((track) => track.stop());
+    mediaStreamRef.current?.getTracks().forEach(t => t.stop());
     mediaStreamRef.current = null;
     if (videoRef.current) videoRef.current.srcObject = null;
     setCameraEnabled(false);
@@ -118,81 +96,93 @@ export default function InterviewPage() {
 
   const startCamera = useCallback(async () => {
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: "user", width: { ideal: 640 }, height: { ideal: 480 } },
-        audio: false,
-      });
+      const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "user", width: { ideal: 640 }, height: { ideal: 480 } }, audio: false });
       mediaStreamRef.current = stream;
-      if (videoRef.current) {
-        videoRef.current.srcObject = stream;
-        videoRef.current.play();
-      }
+      if (videoRef.current) { videoRef.current.srcObject = stream; videoRef.current.play(); }
       setCameraEnabled(true);
       setCameraError("");
-    } catch {
-      setCameraError("Camera access denied.");
-      setCameraEnabled(false);
-    }
+    } catch { setCameraError("Camera access denied."); setCameraEnabled(false); }
   }, []);
 
-  useEffect(() => {
-    return () => { stopCamera(); stopMic(); };
-  }, [stopCamera, stopMic]);
+  // Video recording
+  const startVideoRecording = useCallback(() => {
+    if (!mediaStreamRef.current) { toast.error("Enable camera first"); return; }
+    // Get audio stream too
+    navigator.mediaDevices.getUserMedia({ audio: true }).then(audioStream => {
+      const combined = new MediaStream([...mediaStreamRef.current!.getTracks(), ...audioStream.getTracks()]);
+      const recorder = new MediaRecorder(combined, { mimeType: "video/webm" });
+      recordedChunksRef.current = [];
+      recorder.ondataavailable = (e) => { if (e.data.size > 0) recordedChunksRef.current.push(e.data); };
+      recorder.onstop = () => {
+        const blob = new Blob(recordedChunksRef.current, { type: "video/webm" });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = `interview-${Date.now()}.webm`;
+        a.click();
+        URL.revokeObjectURL(url);
+        toast.success("Interview recording saved!");
+        audioStream.getTracks().forEach(t => t.stop());
+      };
+      recorder.start();
+      mediaRecorderRef.current = recorder;
+      setIsRecordingVideo(true);
+    }).catch(() => toast.error("Microphone access needed for recording"));
+  }, []);
+
+  const stopVideoRecording = useCallback(() => {
+    mediaRecorderRef.current?.stop();
+    mediaRecorderRef.current = null;
+    setIsRecordingVideo(false);
+  }, []);
+
+  useEffect(() => { return () => { stopCamera(); stopMic(); stopTTS(); }; }, [stopCamera, stopMic]);
 
   useEffect(() => {
     if (!selectedType || !loaded) return;
-    if (savedMessages.length > 0) {
-      setMessages(savedMessages);
-      return;
-    }
-    const welcomeMsg = `Welcome to **${selectedType.label} Practice**! 🎯\n\nI'm ${character?.name || "your mentor"} and I'll be your interviewer today.\n\n${cameraEnabled ? "📸 Camera is on — I can see you and will give delivery feedback.\n\n" : ""}🎤 Use the mic button to speak your answers, or type them.\n\nSay **"Start"** when you're ready for your first question!`;
+    if (savedMessages.length > 0) { setMessages(savedMessages); return; }
+    const welcomeMsg = `Welcome to **${selectedType.label} Practice**! 🎯\n\nI'm ${character?.name || "your mentor"} and I'll be your interviewer today.\n\n${cameraEnabled ? "📸 Camera is on — I can see you.\n\n" : ""}🎤 Use the mic button to speak your answers, or type them.\n\nSay **"Start"** when you're ready!`;
     setMessages([{ id: "start", role: "assistant", content: welcomeMsg }]);
   }, [selectedType, loaded, savedMessages]);
 
   const scrollToBottom = useCallback(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" });
   }, []);
-
   useEffect(() => { scrollToBottom(); }, [messages, scrollToBottom]);
 
   const captureCameraFrame = () => {
     if (!cameraEnabled || !videoRef.current) return undefined;
-    const video = videoRef.current;
-    if (!video.videoWidth || !video.videoHeight) return undefined;
-    const canvas = document.createElement("canvas");
-    canvas.width = video.videoWidth;
-    canvas.height = video.videoHeight;
-    const ctx = canvas.getContext("2d");
+    const v = videoRef.current;
+    if (!v.videoWidth || !v.videoHeight) return undefined;
+    const c = document.createElement("canvas");
+    c.width = v.videoWidth; c.height = v.videoHeight;
+    const ctx = c.getContext("2d");
     if (!ctx) return undefined;
-    ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-    return canvas.toDataURL("image/jpeg", 0.7);
+    ctx.drawImage(v, 0, 0);
+    return c.toDataURL("image/jpeg", 0.7);
   };
 
-  const startInterview = (type: InterviewType) => {
-    setSelectedType(type);
-    setMessages([]);
-  };
+  const startInterview = (type: InterviewType) => { setSelectedType(type); setMessages([]); };
 
   const handleSend = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!selectedType || !input.trim() || isStreaming) return;
+    stopTTS();
 
     const userMsg: DisplayMessage = { id: Date.now().toString(), role: "user", content: input.trim() };
     const newMessages = [...messages, userMsg];
     setMessages(newMessages);
     setInput("");
     setIsStreaming(true);
-
+    setAvatarState("listening");
     void saveMessage("user", userMsg.content);
 
     const cameraFrame = captureCameraFrame();
-    const chatHistory: ChatMessage[] = newMessages.map((m) => ({ role: m.role, content: m.content }));
-    const contextualMessages: ChatMessage[] = [
-      { role: "user", content: selectedType.prompt },
-      ...chatHistory,
-    ];
+    const chatHistory: ChatMessage[] = newMessages.map(m => ({ role: m.role, content: m.content }));
+    const contextualMessages: ChatMessage[] = [{ role: "user", content: selectedType.prompt }, ...chatHistory];
 
     let assistantContent = "";
+    setTimeout(() => setAvatarState("thinking"), 300);
 
     await streamChat({
       messages: contextualMessages,
@@ -201,11 +191,10 @@ export default function InterviewPage() {
       cameraFrame,
       onDelta: (chunk) => {
         assistantContent += chunk;
-        setMessages((prev) => {
+        setMessages(prev => {
           const last = prev[prev.length - 1];
-          if (last?.role === "assistant" && last.id.startsWith("stream-")) {
-            return prev.map((m, i) => (i === prev.length - 1 ? { ...m, content: assistantContent } : m));
-          }
+          if (last?.role === "assistant" && last.id.startsWith("stream-"))
+            return prev.map((m, i) => i === prev.length - 1 ? { ...m, content: assistantContent } : m);
           return [...prev, { id: `stream-${Date.now()}`, role: "assistant", content: assistantContent }];
         });
       },
@@ -213,17 +202,15 @@ export default function InterviewPage() {
         setIsStreaming(false);
         if (assistantContent) {
           void saveMessage("assistant", assistantContent);
-          void speak(assistantContent);
-        }
+          if (ttsEnabled) void speakText(assistantContent, character?.voiceId);
+          else setAvatarState("idle");
+        } else setAvatarState("idle");
       },
-      onError: (error) => {
-        setIsStreaming(false);
-        toast.error(error);
-      },
+      onError: (error) => { setIsStreaming(false); setAvatarState("idle"); toast.error(error); },
     });
   };
 
-  const answeredCount = messages.filter((m) => m.role === "user").length;
+  const answeredCount = messages.filter(m => m.role === "user").length;
   const progressPercent = Math.min(100, Math.round((answeredCount / 5) * 100));
 
   if (!selectedType) {
@@ -232,49 +219,33 @@ export default function InterviewPage() {
         <div className="max-w-2xl mx-auto">
           <h1 className="text-2xl font-bold text-foreground mb-2">Interview Practice</h1>
           <p className="text-muted-foreground mb-4 text-sm">
-            {character?.name || "Your mentor"} will interview you. Enable camera for visual feedback and mic to speak your answers.
+            {character?.name || "Your mentor"} will interview you. Enable camera for visual feedback and mic to speak.
           </p>
-
-          {/* Character preview */}
           <div className="flex justify-center mb-6">
-            {character && <Character3D character={character} size="md" />}
+            {character && <AnimatedAvatar character={character} state="idle" size="md" />}
           </div>
-
           <div className="flex gap-3 justify-center mb-6">
-            <button
-              onClick={() => (cameraEnabled ? stopCamera() : startCamera())}
-              className={`inline-flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-medium transition-colors ${cameraEnabled ? "bg-primary text-primary-foreground" : "bg-secondary text-foreground"}`}
-            >
+            <button onClick={() => cameraEnabled ? stopCamera() : startCamera()}
+              className={`inline-flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-medium transition-colors ${cameraEnabled ? "bg-primary text-primary-foreground" : "bg-secondary text-foreground"}`}>
               {cameraEnabled ? <Camera className="w-4 h-4" /> : <CameraOff className="w-4 h-4" />}
               {cameraEnabled ? "Camera On" : "Enable Camera"}
             </button>
-            <button
-              onClick={() => (micEnabled ? stopMic() : startMic())}
-              className={`inline-flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-medium transition-colors ${micEnabled ? "bg-destructive text-destructive-foreground" : "bg-secondary text-foreground"}`}
-            >
+            <button onClick={() => micEnabled ? stopMic() : startMic()}
+              className={`inline-flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-medium transition-colors ${micEnabled ? "bg-destructive text-destructive-foreground" : "bg-secondary text-foreground"}`}>
               {micEnabled ? <Mic className="w-4 h-4" /> : <MicOff className="w-4 h-4" />}
               {micEnabled ? "Mic On" : "Enable Mic"}
             </button>
           </div>
-
-          {/* Camera preview before starting */}
           {cameraEnabled && (
             <div className="surface-card p-2 mb-6 max-w-xs mx-auto">
               <video ref={videoRef} autoPlay muted playsInline className="w-full aspect-video object-cover rounded-lg bg-secondary" style={{ transform: "scaleX(-1)" }} />
             </div>
           )}
           {cameraError && <p className="text-xs text-destructive text-center mb-4">{cameraError}</p>}
-
           <div className="grid gap-4 sm:grid-cols-2">
             {interviewTypes.map((type, i) => (
-              <motion.button
-                key={type.id}
-                initial={{ opacity: 0, y: 20 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ delay: i * 0.1 }}
-                onClick={() => startInterview(type)}
-                className="surface-card p-6 text-left hover:border-primary/30 transition-colors"
-              >
+              <motion.button key={type.id} initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.1 }}
+                onClick={() => startInterview(type)} className="surface-card p-6 text-left hover:border-primary/30 transition-colors">
                 <div className={`w-12 h-12 rounded-xl bg-gradient-to-br ${type.color} flex items-center justify-center mb-3`}>
                   <type.icon className="w-6 h-6 text-white" />
                 </div>
@@ -290,67 +261,51 @@ export default function InterviewPage() {
 
   return (
     <div className="flex flex-col h-screen md:pt-14 pb-20 md:pb-0">
-      {/* Header */}
       <div className="flex items-center gap-3 px-4 py-3 border-b border-border bg-card/50 backdrop-blur-md">
-        <button onClick={() => { setSelectedType(null); setMessages([]); stopCamera(); stopMic(); }} className="p-2 hover:bg-secondary rounded-lg transition-colors">
+        <button onClick={() => { setSelectedType(null); setMessages([]); stopCamera(); stopMic(); stopTTS(); }} className="p-2 hover:bg-secondary rounded-lg transition-colors">
           <ArrowLeft className="w-4 h-4 text-muted-foreground" />
         </button>
-
-        {/* Interviewer avatar */}
         <div className="flex-shrink-0">
-          {character && (
-            <Character3D
-              character={character}
-              isSpeaking={isSpeaking}
-              isThinking={isStreaming && !isSpeaking}
-              size="sm"
-            />
-          )}
+          {character && <AnimatedAvatar character={character} state={avatarState} size="sm" audioElement={ttsAudio} />}
         </div>
-
         <div className="flex-1 min-w-0">
           <h1 className="font-semibold text-foreground text-sm truncate">{selectedType.label} — {character?.name || "XOVA"}</h1>
           <p className="text-xs text-muted-foreground">{answeredCount} answers · {progressPercent}% complete</p>
         </div>
         <div className="flex gap-1.5">
-          <button
-            onClick={() => setTtsEnabled(!ttsEnabled)}
-            className={`p-1.5 rounded-lg text-xs transition-colors ${ttsEnabled ? "bg-primary/10 text-primary" : "bg-secondary text-muted-foreground"}`}
-          >
+          <button onClick={() => setTtsEnabled(!ttsEnabled)} className={`p-1.5 rounded-lg text-xs transition-colors ${ttsEnabled ? "bg-primary/10 text-primary" : "bg-secondary text-muted-foreground"}`}>
             {ttsEnabled ? <Volume2 className="w-3.5 h-3.5" /> : <VolumeX className="w-3.5 h-3.5" />}
           </button>
-          <button
-            onClick={() => (micEnabled ? stopMic() : startMic())}
-            className={`p-1.5 rounded-lg text-xs transition-colors ${micEnabled ? "bg-destructive text-destructive-foreground" : "bg-secondary text-foreground"}`}
-          >
+          <button onClick={() => micEnabled ? stopMic() : startMic()} className={`p-1.5 rounded-lg text-xs transition-colors ${micEnabled ? "bg-destructive text-destructive-foreground" : "bg-secondary text-foreground"}`}>
             {micEnabled ? <Mic className="w-3.5 h-3.5" /> : <MicOff className="w-3.5 h-3.5" />}
           </button>
-          <button
-            onClick={() => (cameraEnabled ? stopCamera() : startCamera())}
-            className={`p-1.5 rounded-lg text-xs transition-colors ${cameraEnabled ? "bg-primary text-primary-foreground" : "bg-secondary text-foreground"}`}
-          >
+          <button onClick={() => cameraEnabled ? stopCamera() : startCamera()} className={`p-1.5 rounded-lg text-xs transition-colors ${cameraEnabled ? "bg-primary text-primary-foreground" : "bg-secondary text-foreground"}`}>
             {cameraEnabled ? <Camera className="w-3.5 h-3.5" /> : <CameraOff className="w-3.5 h-3.5" />}
           </button>
+          {cameraEnabled && (
+            <button onClick={() => isRecordingVideo ? stopVideoRecording() : startVideoRecording()}
+              className={`p-1.5 rounded-lg text-xs transition-colors ${isRecordingVideo ? "bg-destructive text-destructive-foreground animate-pulse" : "bg-secondary text-foreground"}`}>
+              {isRecordingVideo ? <StopCircle className="w-3.5 h-3.5" /> : <Video className="w-3.5 h-3.5" />}
+            </button>
+          )}
         </div>
       </div>
 
-      {/* Progress */}
       <div className="px-4 py-2 border-b border-border bg-card/40">
         <div className="w-full h-1.5 bg-secondary rounded-full">
           <motion.div className="h-full bg-primary rounded-full" animate={{ width: `${progressPercent}%` }} />
         </div>
       </div>
 
-      {/* Chat + Camera */}
       <div ref={scrollRef} className="flex-1 overflow-y-auto px-4 py-4 space-y-3">
-        {/* Camera preview */}
         {cameraEnabled && (
           <div className="surface-card p-2 mb-3 max-w-sm mx-auto">
             <video ref={videoRef} autoPlay muted playsInline className="w-full aspect-video object-cover rounded-lg bg-secondary" style={{ transform: "scaleX(-1)" }} />
-            <p className="text-[10px] text-muted-foreground text-center mt-1">Your camera — AI sees snapshots with each answer</p>
+            <p className="text-[10px] text-muted-foreground text-center mt-1">
+              {isRecordingVideo ? "🔴 Recording..." : "Your camera — AI sees snapshots with each answer"}
+            </p>
           </div>
         )}
-
         {!cameraEnabled && <video ref={videoRef} className="hidden" />}
 
         {isRecording && (
@@ -361,7 +316,7 @@ export default function InterviewPage() {
         )}
 
         <AnimatePresence mode="popLayout">
-          {messages.map((msg) => (
+          {messages.map(msg => (
             <motion.div key={msg.id} initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className={`flex ${msg.role === "user" ? "justify-end" : "justify-start gap-2"}`}>
               {msg.role === "assistant" && character && (
                 <div className="w-8 h-8 rounded-full overflow-hidden flex-shrink-0 mt-1 ring-1 ring-primary/20">
@@ -386,10 +341,10 @@ export default function InterviewPage() {
         </AnimatePresence>
       </div>
 
-      {/* Input */}
       <form onSubmit={handleSend} className="px-4 py-3 border-t border-border bg-card/50 backdrop-blur-md">
         <div className="flex gap-2 max-w-3xl mx-auto">
-          <input value={input} onChange={(e) => setInput(e.target.value)} placeholder="Type or speak your answer..." disabled={isStreaming} className="flex-1 bg-secondary rounded-xl px-4 py-3 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 disabled:opacity-50" />
+          <input value={input} onChange={e => setInput(e.target.value)} placeholder="Type or speak your answer..." disabled={isStreaming}
+            className="flex-1 bg-secondary rounded-xl px-4 py-3 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 disabled:opacity-50" />
           <button type="submit" disabled={!input.trim() || isStreaming} className="p-3 rounded-xl bg-primary text-primary-foreground hover:opacity-90 disabled:opacity-40">
             <Send className="w-4 h-4" />
           </button>
