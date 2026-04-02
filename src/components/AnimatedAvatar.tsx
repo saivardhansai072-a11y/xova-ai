@@ -24,6 +24,7 @@ export default function AnimatedAvatar({
   const animFrameRef = useRef<number>(0);
   const audioCtxRef = useRef<AudioContext | null>(null);
   const sourceRef = useRef<MediaElementAudioSourceNode | null>(null);
+  const lastAudioRef = useRef<HTMLAudioElement | null>(null);
 
   const sizes = { sm: 80, md: 140, lg: 200 };
   const s = sizes[size];
@@ -61,8 +62,13 @@ export default function AnimatedAvatar({
       }
       const ctx = audioCtxRef.current;
 
-      if (!sourceRef.current) {
+      // Each HTMLAudioElement can only have one MediaElementSource — recreate when element changes
+      if (lastAudioRef.current !== audio) {
+        if (sourceRef.current) {
+          try { sourceRef.current.disconnect(); } catch {}
+        }
         sourceRef.current = ctx.createMediaElementSource(audio);
+        lastAudioRef.current = audio;
       }
 
       const analyser = ctx.createAnalyser();
