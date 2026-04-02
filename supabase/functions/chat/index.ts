@@ -2,7 +2,8 @@ import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
+  "Access-Control-Allow-Headers":
+    "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
 };
 
 type IncomingMessage = {
@@ -21,8 +22,8 @@ serve(async (req) => {
       cameraFrame?: string;
     };
 
-    const GROQ_API_KEY = Deno.env.get("GROQ_API_KEY");
     const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
+    const GROQ_API_KEY = Deno.env.get("GROQ_API_KEY");
 
     const hasCameraFrame = typeof cameraFrame === "string" && cameraFrame.startsWith("data:image");
 
@@ -80,11 +81,10 @@ Always be supportive, clear, and engaging. Keep responses concise but thorough.`
 - Support personal conversations with empathy`;
     }
 
-    let response: Response;
-
-    if (mode === "interview" && hasCameraFrame && LOVABLE_API_KEY) {
-      const gatewayMessages = messages.map((msg, index) => {
-        if (index === messages.length - 1 && msg.role === "user") {
+    // Build messages — attach camera frame as multimodal content when present
+    const buildMessages = () =>
+      messages.map((msg, i) => {
+        if (hasCameraFrame && i === messages.length - 1 && msg.role === "user") {
           return {
             role: "user",
             content: [
@@ -93,13 +93,13 @@ Always be supportive, clear, and engaging. Keep responses concise but thorough.`
             ],
           };
         }
-
-        return {
-          role: msg.role,
-          content: msg.content,
-        };
+        return { role: msg.role, content: msg.content };
       });
 
+    let response: Response;
+
+    // Primary: Lovable AI Gateway (always available, no external key needed)
+    if (LOVABLE_API_KEY) {
       response = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
         method: "POST",
         headers: {
@@ -108,18 +108,14 @@ Always be supportive, clear, and engaging. Keep responses concise but thorough.`
         },
         body: JSON.stringify({
           model: "google/gemini-2.5-flash",
-          messages: [
-            { role: "system", content: systemPrompt },
-            ...gatewayMessages,
-          ],
+          messages: [{ role: "system", content: systemPrompt }, ...buildMessages()],
           stream: true,
           temperature: 0.7,
           max_tokens: 2048,
         }),
       });
-    } else {
-      if (!GROQ_API_KEY) throw new Error("GROQ_API_KEY is not configured");
-
+    } else if (GROQ_API_KEY) {
+      // Fallback: Groq
       response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
         method: "POST",
         headers: {
@@ -128,21 +124,23 @@ Always be supportive, clear, and engaging. Keep responses concise but thorough.`
         },
         body: JSON.stringify({
           model: "llama-3.3-70b-versatile",
-          messages: [
-            { role: "system", content: systemPrompt },
-            ...messages,
-          ],
+          messages: [{ role: "system", content: systemPrompt }, ...messages],
           stream: true,
           temperature: 0.7,
           max_tokens: 2048,
         }),
       });
+    } else {
+      throw new Error("No AI provider configured");
     }
 
     if (!response.ok) {
-      if (response.status === 429) {
-        return new Response(JSON.stringify({ error: "Rate limit exceeded. Please wait a moment." }), {
-          status: 429,
+      if (response.status === 429 || response.status === 402) {
+        const msg = response.status === 402
+          ? "AI credits exhausted. Please add funds."
+          : "Rate limit exceeded. Please wait a moment.";
+        return new Response(JSON.stringify({ error: msg }), {
+          status: response.status,
           headers: { ...corsHeaders, "Content-Type": "application/json" },
         });
       }
