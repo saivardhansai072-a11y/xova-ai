@@ -92,9 +92,13 @@ export default function MentorPage() {
     <div className="min-h-screen flex flex-col items-center justify-center px-6 pb-24 md:pt-16">
       <div className="max-w-lg w-full flex flex-col items-center text-center">
         <motion.div initial={{ opacity: 0, scale: 0.8 }} animate={{ opacity: 1, scale: 1 }} transition={{ duration: 0.6 }}>
-          {character && (
+          {character && use3D ? (
+            <Suspense fallback={<div className="w-[200px] h-[240px] flex items-center justify-center"><div className="w-16 h-16 rounded-full bg-primary/20 animate-pulse" /></div>}>
+              <Avatar3D character={character} state={avatarState} size="lg" audioElement={ttsAudio} />
+            </Suspense>
+          ) : character ? (
             <AnimatedAvatar character={character} state={avatarState} size="lg" audioElement={ttsAudio} />
-          )}
+          ) : null}
         </motion.div>
 
         <p className="text-xs text-muted-foreground mt-2">{character?.anime || "AI Mentor"}</p>
