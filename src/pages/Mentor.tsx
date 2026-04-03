@@ -1,6 +1,6 @@
-import { useState, useMemo, useEffect } from "react";
+import { useState, useMemo, useEffect, lazy, Suspense } from "react";
 import { motion } from "framer-motion";
-import { Mic, MicOff, Volume2, VolumeX, Users } from "lucide-react";
+import { Mic, MicOff, Volume2, VolumeX, Users, Box, CircleDot } from "lucide-react";
 import AnimatedAvatar from "@/components/AnimatedAvatar";
 import { streamChat, ChatMessage } from "@/lib/ai-stream";
 import { speakText, stopTTS, onTTSAudioChange } from "@/lib/tts-player";
@@ -8,6 +8,8 @@ import { getSelectedCharacterId, getCharacterById } from "@/lib/characters";
 import ReactMarkdown from "react-markdown";
 import { Link } from "react-router-dom";
 import { toast } from "sonner";
+
+const Avatar3D = lazy(() => import("@/components/Avatar3D"));
 
 export default function MentorPage() {
   const character = useMemo(() => {
@@ -23,6 +25,7 @@ export default function MentorPage() {
   const [inputText, setInputText] = useState("");
   const [isProcessing, setIsProcessing] = useState(false);
   const [ttsAudio, setTtsAudio] = useState<HTMLAudioElement | null>(null);
+  const [use3D, setUse3D] = useState(() => localStorage.getItem("xova-3d-avatar") !== "false");
 
   useEffect(() => {
     const unsub = onTTSAudioChange((audio) => {
@@ -89,9 +92,13 @@ export default function MentorPage() {
     <div className="min-h-screen flex flex-col items-center justify-center px-6 pb-24 md:pt-16">
       <div className="max-w-lg w-full flex flex-col items-center text-center">
         <motion.div initial={{ opacity: 0, scale: 0.8 }} animate={{ opacity: 1, scale: 1 }} transition={{ duration: 0.6 }}>
-          {character && (
+          {character && use3D ? (
+            <Suspense fallback={<div className="w-[200px] h-[240px] flex items-center justify-center"><div className="w-16 h-16 rounded-full bg-primary/20 animate-pulse" /></div>}>
+              <Avatar3D character={character} state={avatarState} size="lg" audioElement={ttsAudio} />
+            </Suspense>
+          ) : character ? (
             <AnimatedAvatar character={character} state={avatarState} size="lg" audioElement={ttsAudio} />
-          )}
+          ) : null}
         </motion.div>
 
         <p className="text-xs text-muted-foreground mt-2">{character?.anime || "AI Mentor"}</p>
@@ -120,6 +127,13 @@ export default function MentorPage() {
             className={`p-5 rounded-full transition-all ${isListening ? "bg-destructive text-destructive-foreground animate-pulse" : "bg-primary text-primary-foreground hover:opacity-90"} disabled:opacity-40`}
           >
             {isListening ? <MicOff className="w-6 h-6" /> : <Mic className="w-6 h-6" />}
+          </button>
+          <button
+            onClick={() => { setUse3D(!use3D); localStorage.setItem("xova-3d-avatar", String(!use3D)); }}
+            className="p-3 rounded-full bg-secondary text-muted-foreground hover:text-foreground transition-colors"
+            title={use3D ? "Switch to 2D avatar" : "Switch to 3D avatar"}
+          >
+            {use3D ? <CircleDot className="w-5 h-5" /> : <Box className="w-5 h-5" />}
           </button>
           <Link to="/characters" className="p-3 rounded-full bg-secondary text-muted-foreground hover:text-foreground transition-colors">
             <Users className="w-5 h-5" />
