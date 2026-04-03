@@ -128,6 +128,13 @@ export default function MentorPage() {
           >
             {isListening ? <MicOff className="w-6 h-6" /> : <Mic className="w-6 h-6" />}
           </button>
+          <button
+            onClick={() => { setUse3D(!use3D); localStorage.setItem("xova-3d-avatar", String(!use3D)); }}
+            className="p-3 rounded-full bg-secondary text-muted-foreground hover:text-foreground transition-colors"
+            title={use3D ? "Switch to 2D avatar" : "Switch to 3D avatar"}
+          >
+            {use3D ? <CircleDot className="w-5 h-5" /> : <Box className="w-5 h-5" />}
+          </button>
           <Link to="/characters" className="p-3 rounded-full bg-secondary text-muted-foreground hover:text-foreground transition-colors">
             <Users className="w-5 h-5" />
           </Link>
