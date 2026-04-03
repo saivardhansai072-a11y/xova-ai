@@ -190,7 +190,7 @@ function AvatarModel({
     }
 
     // Expressions based on state
-    if (state === "happy" || state === "celebrating") {
+    if (state === "celebrating") {
       setMorphTarget("mouthSmileLeft", 0.7);
       setMorphTarget("mouthSmileRight", 0.7);
     } else if (state === "thinking") {
