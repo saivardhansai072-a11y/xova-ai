@@ -25,6 +25,7 @@ export default function MentorPage() {
   const [inputText, setInputText] = useState("");
   const [isProcessing, setIsProcessing] = useState(false);
   const [ttsAudio, setTtsAudio] = useState<HTMLAudioElement | null>(null);
+  const [use3D, setUse3D] = useState(() => localStorage.getItem("xova-3d-avatar") !== "false");
 
   useEffect(() => {
     const unsub = onTTSAudioChange((audio) => {
