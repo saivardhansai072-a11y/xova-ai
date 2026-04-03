@@ -1,6 +1,6 @@
-import { useState, useMemo, useEffect } from "react";
+import { useState, useMemo, useEffect, lazy, Suspense } from "react";
 import { motion } from "framer-motion";
-import { Mic, MicOff, Volume2, VolumeX, Users } from "lucide-react";
+import { Mic, MicOff, Volume2, VolumeX, Users, Box, CircleDot } from "lucide-react";
 import AnimatedAvatar from "@/components/AnimatedAvatar";
 import { streamChat, ChatMessage } from "@/lib/ai-stream";
 import { speakText, stopTTS, onTTSAudioChange } from "@/lib/tts-player";
@@ -8,6 +8,8 @@ import { getSelectedCharacterId, getCharacterById } from "@/lib/characters";
 import ReactMarkdown from "react-markdown";
 import { Link } from "react-router-dom";
 import { toast } from "sonner";
+
+const Avatar3D = lazy(() => import("@/components/Avatar3D"));
 
 export default function MentorPage() {
   const character = useMemo(() => {
