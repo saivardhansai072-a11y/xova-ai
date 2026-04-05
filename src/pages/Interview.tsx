@@ -1,6 +1,6 @@
-import { useState, useRef, useEffect, useCallback, useMemo } from "react";
+import { useState, useRef, useEffect, useCallback, useMemo, lazy, Suspense } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { Send, Briefcase, Code, Users as UsersIcon, Rocket, ArrowLeft, Camera, CameraOff, Mic, MicOff, Volume2, VolumeX, Video, StopCircle } from "lucide-react";
+import { Send, Briefcase, Code, Users as UsersIcon, Rocket, ArrowLeft, Camera, CameraOff, Mic, MicOff, Volume2, VolumeX, Video, StopCircle, Box, CircleDot } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import AnimatedAvatar from "@/components/AnimatedAvatar";
 import { streamChat, ChatMessage } from "@/lib/ai-stream";
@@ -8,6 +8,8 @@ import { speakText, stopTTS, onTTSAudioChange } from "@/lib/tts-player";
 import { getSelectedCharacterId, getCharacterById } from "@/lib/characters";
 import { toast } from "sonner";
 import { useChatHistory } from "@/hooks/useChatHistory";
+
+const Avatar3D = lazy(() => import("@/components/Avatar3D"));
 
 type InterviewType = { id: string; label: string; icon: React.ElementType; prompt: string; color: string };
 
@@ -38,6 +40,7 @@ export default function InterviewPage() {
   const [avatarState, setAvatarState] = useState<"idle" | "speaking" | "listening" | "thinking">("idle");
   const [ttsAudio, setTtsAudio] = useState<HTMLAudioElement | null>(null);
   const [isRecordingVideo, setIsRecordingVideo] = useState(false);
+  const [use3D, setUse3D] = useState(() => localStorage.getItem("xova-3d-avatar") !== "false");
 
   const videoRef = useRef<HTMLVideoElement>(null);
   const mediaStreamRef = useRef<MediaStream | null>(null);
@@ -50,7 +53,6 @@ export default function InterviewPage() {
   const characterId = character?.id || "naruto";
   const { messages: savedMessages, saveMessage, loaded } = useChatHistory(characterId, mode);
 
-  // TTS audio tracking
   useEffect(() => {
     const unsub = onTTSAudioChange((audio) => {
       setTtsAudio(audio);
@@ -104,10 +106,8 @@ export default function InterviewPage() {
     } catch { setCameraError("Camera access denied."); setCameraEnabled(false); }
   }, []);
 
-  // Video recording
   const startVideoRecording = useCallback(() => {
     if (!mediaStreamRef.current) { toast.error("Enable camera first"); return; }
-    // Get audio stream too
     navigator.mediaDevices.getUserMedia({ audio: true }).then(audioStream => {
       const combined = new MediaStream([...mediaStreamRef.current!.getTracks(), ...audioStream.getTracks()]);
       const recorder = new MediaRecorder(combined, { mimeType: "video/webm" });
@@ -213,6 +213,18 @@ export default function InterviewPage() {
   const answeredCount = messages.filter(m => m.role === "user").length;
   const progressPercent = Math.min(100, Math.round((answeredCount / 5) * 100));
 
+  const renderAvatar = (avatarSt: typeof avatarState, size: "sm" | "md" | "lg") => {
+    if (!character) return null;
+    if (use3D) {
+      return (
+        <Suspense fallback={<div className="w-10 h-10 rounded-full bg-primary/20 animate-pulse" />}>
+          <Avatar3D character={character} state={avatarSt} size={size} audioElement={ttsAudio} />
+        </Suspense>
+      );
+    }
+    return <AnimatedAvatar character={character} state={avatarSt} size={size} audioElement={ttsAudio} />;
+  };
+
   if (!selectedType) {
     return (
       <div className="min-h-screen px-6 pb-24 md:pt-20 pt-8">
@@ -222,9 +234,9 @@ export default function InterviewPage() {
             {character?.name || "Your mentor"} will interview you. Enable camera for visual feedback and mic to speak.
           </p>
           <div className="flex justify-center mb-6">
-            {character && <AnimatedAvatar character={character} state="idle" size="md" />}
+            {renderAvatar("idle", "md")}
           </div>
-          <div className="flex gap-3 justify-center mb-6">
+          <div className="flex gap-3 justify-center mb-6 flex-wrap">
             <button onClick={() => cameraEnabled ? stopCamera() : startCamera()}
               className={`inline-flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-medium transition-colors ${cameraEnabled ? "bg-primary text-primary-foreground" : "bg-secondary text-foreground"}`}>
               {cameraEnabled ? <Camera className="w-4 h-4" /> : <CameraOff className="w-4 h-4" />}
@@ -234,6 +246,11 @@ export default function InterviewPage() {
               className={`inline-flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-medium transition-colors ${micEnabled ? "bg-destructive text-destructive-foreground" : "bg-secondary text-foreground"}`}>
               {micEnabled ? <Mic className="w-4 h-4" /> : <MicOff className="w-4 h-4" />}
               {micEnabled ? "Mic On" : "Enable Mic"}
+            </button>
+            <button onClick={() => { setUse3D(!use3D); localStorage.setItem("xova-3d-avatar", String(!use3D)); }}
+              className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-medium transition-colors bg-secondary text-foreground">
+              {use3D ? <CircleDot className="w-4 h-4" /> : <Box className="w-4 h-4" />}
+              {use3D ? "2D Avatar" : "3D Avatar"}
             </button>
           </div>
           {cameraEnabled && (
@@ -266,13 +283,17 @@ export default function InterviewPage() {
           <ArrowLeft className="w-4 h-4 text-muted-foreground" />
         </button>
         <div className="flex-shrink-0">
-          {character && <AnimatedAvatar character={character} state={avatarState} size="sm" audioElement={ttsAudio} />}
+          {!use3D && character && <AnimatedAvatar character={character} state={avatarState} size="sm" audioElement={ttsAudio} />}
         </div>
         <div className="flex-1 min-w-0">
           <h1 className="font-semibold text-foreground text-sm truncate">{selectedType.label} — {character?.name || "XOVA"}</h1>
           <p className="text-xs text-muted-foreground">{answeredCount} answers · {progressPercent}% complete</p>
         </div>
         <div className="flex gap-1.5">
+          <button onClick={() => { setUse3D(!use3D); localStorage.setItem("xova-3d-avatar", String(!use3D)); }}
+            className={`p-1.5 rounded-lg text-xs transition-colors bg-secondary text-muted-foreground`}>
+            {use3D ? <CircleDot className="w-3.5 h-3.5" /> : <Box className="w-3.5 h-3.5" />}
+          </button>
           <button onClick={() => setTtsEnabled(!ttsEnabled)} className={`p-1.5 rounded-lg text-xs transition-colors ${ttsEnabled ? "bg-primary/10 text-primary" : "bg-secondary text-muted-foreground"}`}>
             {ttsEnabled ? <Volume2 className="w-3.5 h-3.5" /> : <VolumeX className="w-3.5 h-3.5" />}
           </button>
@@ -290,6 +311,13 @@ export default function InterviewPage() {
           )}
         </div>
       </div>
+
+      {/* 3D Avatar display */}
+      {use3D && character && (
+        <div className="flex justify-center py-3 border-b border-border bg-card/30">
+          {renderAvatar(avatarState, "sm")}
+        </div>
+      )}
 
       <div className="px-4 py-2 border-b border-border bg-card/40">
         <div className="w-full h-1.5 bg-secondary rounded-full">
