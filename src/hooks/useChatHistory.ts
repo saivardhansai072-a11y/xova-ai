@@ -34,7 +34,7 @@ export function useChatHistory(characterId: string, mode: string = "chat") {
       setLoaded(true);
     };
 
-    fetch();
+    loadMessages();
   }, [user, characterId, mode]);
 
   const saveMessage = useCallback(async (role: "user" | "assistant", content: string) => {
