@@ -16,7 +16,7 @@ export function useChatHistory(characterId: string, mode: string = "chat") {
   useEffect(() => {
     if (!user) return;
 
-    const fetch = async () => {
+    const loadMessages = async () => {
       const { data } = await supabase
         .from("chat_history")
         .select("*")
@@ -34,7 +34,7 @@ export function useChatHistory(characterId: string, mode: string = "chat") {
       setLoaded(true);
     };
 
-    fetch();
+    loadMessages();
   }, [user, characterId, mode]);
 
   const saveMessage = useCallback(async (role: "user" | "assistant", content: string) => {
