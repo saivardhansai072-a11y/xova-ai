@@ -16,7 +16,7 @@ export function useChatHistory(characterId: string, mode: string = "chat") {
   useEffect(() => {
     if (!user) return;
 
-    const fetch = async () => {
+    const loadMessages = async () => {
       const { data } = await supabase
         .from("chat_history")
         .select("*")
