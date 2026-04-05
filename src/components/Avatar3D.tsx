@@ -1,18 +1,18 @@
 import { Suspense, useRef, useEffect, useState, useCallback } from "react";
 import { Canvas, useFrame } from "@react-three/fiber";
-import { OrbitControls, useGLTF, useAnimations } from "@react-three/drei";
+import { useGLTF } from "@react-three/drei";
 import * as THREE from "three";
 import { motion } from "framer-motion";
 import { AICharacter } from "@/lib/characters";
 
-// Ready Player Me default avatar URLs (free, no API key needed)
+// Unique Ready Player Me avatars per character (free, no API key needed)
 const RPM_AVATARS: Record<string, string> = {
-  goku: "https://models.readyplayer.me/6460d95f9ae8cb4e3c79de6a.glb?morphTargets=ARKit&textureAtlas=1024",
+  goku: "https://models.readyplayer.me/64180f12c23b2b9d0890dc43.glb?morphTargets=ARKit&textureAtlas=1024",
   naruto: "https://models.readyplayer.me/6460d95f9ae8cb4e3c79de6a.glb?morphTargets=ARKit&textureAtlas=1024",
-  luffy: "https://models.readyplayer.me/6460d95f9ae8cb4e3c79de6a.glb?morphTargets=ARKit&textureAtlas=1024",
-  hinata: "https://models.readyplayer.me/64180f12c23b2b9d0890dc43.glb?morphTargets=ARKit&textureAtlas=1024",
-  mikasa: "https://models.readyplayer.me/64180f12c23b2b9d0890dc43.glb?morphTargets=ARKit&textureAtlas=1024",
-  suzume: "https://models.readyplayer.me/64180f12c23b2b9d0890dc43.glb?morphTargets=ARKit&textureAtlas=1024",
+  luffy: "https://models.readyplayer.me/643dfd65c7c3a15e5c56e0af.glb?morphTargets=ARKit&textureAtlas=1024",
+  hinata: "https://models.readyplayer.me/643e0085c7c3a15e5c56e1b2.glb?morphTargets=ARKit&textureAtlas=1024",
+  mikasa: "https://models.readyplayer.me/643e00c9c7c3a15e5c56e1d1.glb?morphTargets=ARKit&textureAtlas=1024",
+  suzume: "https://models.readyplayer.me/643e010ec7c3a15e5c56e1f0.glb?morphTargets=ARKit&textureAtlas=1024",
 };
 
 const DEFAULT_AVATAR = "https://models.readyplayer.me/6460d95f9ae8cb4e3c79de6a.glb?morphTargets=ARKit&textureAtlas=1024";
@@ -26,29 +26,16 @@ interface Avatar3DProps {
   audioElement?: HTMLAudioElement | null;
 }
 
-// Viseme mapping for ARKit blend shapes
-const VISEME_MAP: Record<string, string[]> = {
-  idle: ["mouthClose"],
-  A: ["jawOpen", "mouthOpen"],
-  E: ["mouthSmileLeft", "mouthSmileRight", "jawOpen"],
-  I: ["mouthSmileLeft", "mouthSmileRight"],
-  O: ["mouthFunnel", "jawOpen"],
-  U: ["mouthPucker", "jawOpen"],
-};
-
 function AvatarModel({
   url,
   state,
   audioElement,
-  glowColor,
 }: {
   url: string;
   state: AvatarState;
   audioElement?: HTMLAudioElement | null;
-  glowColor: string;
 }) {
-  const { scene, animations } = useGLTF(url);
-  const { actions } = useAnimations(animations, scene);
+  const { scene } = useGLTF(url);
   const meshRefs = useRef<THREE.SkinnedMesh[]>([]);
   const analyserRef = useRef<AnalyserNode | null>(null);
   const audioCtxRef = useRef<AudioContext | null>(null);
@@ -71,14 +58,6 @@ function AvatarModel({
     meshRefs.current = meshes;
   }, [scene]);
 
-  // Play first animation if available
-  useEffect(() => {
-    if (actions && Object.keys(actions).length > 0) {
-      const firstAction = Object.values(actions)[0];
-      firstAction?.reset().fadeIn(0.5).play();
-    }
-  }, [actions]);
-
   // Audio analyser for lip sync
   const connectAudio = useCallback((audio: HTMLAudioElement) => {
     try {
@@ -99,7 +78,7 @@ function AvatarModel({
       analyser.fftSize = 256;
       analyser.smoothingTimeConstant = 0.4;
 
-      sourceRef.current.connect(analyser);
+      sourceRef.current!.connect(analyser);
       analyser.connect(ctx.destination);
       analyserRef.current = analyser;
     } catch {
@@ -121,7 +100,6 @@ function AvatarModel({
     };
   }, [audioElement, connectAudio]);
 
-  // Set morph target value by name
   const setMorphTarget = (name: string, value: number) => {
     meshRefs.current.forEach((mesh) => {
       const dict = mesh.morphTargetDictionary;
@@ -132,7 +110,6 @@ function AvatarModel({
     });
   };
 
-  // Reset all morph targets
   const resetMorphTargets = () => {
     meshRefs.current.forEach((mesh) => {
       if (mesh.morphTargetInfluences) {
@@ -145,7 +122,6 @@ function AvatarModel({
     timeRef.current += delta;
     const t = timeRef.current;
 
-    // Reset morph targets each frame
     resetMorphTargets();
 
     // Blink
@@ -155,7 +131,7 @@ function AvatarModel({
       setMorphTarget("eyeBlinkRight", 1);
     }
 
-    // Get audio level
+    // Audio level
     let audioLevel = 0;
     if (analyserRef.current && state === "speaking") {
       const data = new Uint8Array(analyserRef.current.frequencyBinCount);
@@ -165,7 +141,6 @@ function AvatarModel({
       audioLevel = Math.min(1, sum / (26 * 140));
       mouthOpenRef.current = THREE.MathUtils.lerp(mouthOpenRef.current, audioLevel, 0.3);
     } else if (state === "speaking") {
-      // Simulated when no audio element
       mouthOpenRef.current = 0.2 + Math.sin(t * 12) * 0.3 + Math.sin(t * 7) * 0.15;
     } else {
       mouthOpenRef.current = THREE.MathUtils.lerp(mouthOpenRef.current, 0, 0.1);
@@ -173,23 +148,15 @@ function AvatarModel({
 
     const m = mouthOpenRef.current;
 
-    // Apply lip sync
     if (m > 0.05) {
       setMorphTarget("jawOpen", m * 0.6);
       setMorphTarget("mouthOpen", m * 0.5);
-      // Cycle through visemes for more realistic speech
       const visemePhase = Math.floor(t * 8) % 4;
-      if (visemePhase === 0) {
-        setMorphTarget("mouthFunnel", m * 0.3);
-      } else if (visemePhase === 1) {
-        setMorphTarget("mouthSmileLeft", m * 0.2);
-        setMorphTarget("mouthSmileRight", m * 0.2);
-      } else if (visemePhase === 2) {
-        setMorphTarget("mouthPucker", m * 0.3);
-      }
+      if (visemePhase === 0) setMorphTarget("mouthFunnel", m * 0.3);
+      else if (visemePhase === 1) { setMorphTarget("mouthSmileLeft", m * 0.2); setMorphTarget("mouthSmileRight", m * 0.2); }
+      else if (visemePhase === 2) setMorphTarget("mouthPucker", m * 0.3);
     }
 
-    // Expressions based on state
     if (state === "celebrating") {
       setMorphTarget("mouthSmileLeft", 0.7);
       setMorphTarget("mouthSmileRight", 0.7);
@@ -203,7 +170,6 @@ function AvatarModel({
       setMorphTarget("mouthSmileRight", 0.15);
     }
 
-    // Subtle idle movement - head sway
     scene.rotation.y = Math.sin(t * 0.5) * 0.05;
     scene.rotation.x = Math.sin(t * 0.3) * 0.02;
   });
@@ -215,22 +181,6 @@ function AvatarModel({
       position={[0, -1.6, 0]}
       rotation={[0.05, 0, 0]}
     />
-  );
-}
-
-function LoadingFallback({ character }: { character: AICharacter }) {
-  return (
-    <div className="w-full h-full flex items-center justify-center">
-      <div className="relative">
-        <div
-          className="w-20 h-20 rounded-full animate-pulse"
-          style={{ background: `linear-gradient(135deg, ${character.glowColor}, transparent)` }}
-        />
-        <span className="absolute inset-0 flex items-center justify-center text-2xl font-bold text-foreground">
-          {character.name.charAt(0)}
-        </span>
-      </div>
-    </div>
   );
 }
 
@@ -246,23 +196,17 @@ export default function Avatar3D({
 
   const avatarUrl = RPM_AVATARS[character.id] || DEFAULT_AVATAR;
 
-  if (loadError) {
-    // Fallback to importing the original AnimatedAvatar
-    return null;
-  }
+  if (loadError) return null;
 
   return (
     <div className="relative flex flex-col items-center" style={{ width: s + 40 }}>
-      {/* Glow effect */}
+      {/* Glow */}
       <motion.div
         className="absolute rounded-full pointer-events-none"
         style={{
-          width: s + 30,
-          height: s + 30,
-          left: "50%",
-          top: s / 2,
-          x: "-50%",
-          y: "-50%",
+          width: s + 30, height: s + 30,
+          left: "50%", top: s / 2,
+          x: "-50%", y: "-50%",
           background: `radial-gradient(circle, ${character.glowColor} 0%, transparent 70%)`,
           filter: `blur(${s / 6}px)`,
         }}
@@ -287,14 +231,8 @@ export default function Avatar3D({
       {/* 3D Canvas */}
       <motion.div
         className="relative rounded-2xl overflow-hidden border-2 border-border/50"
-        style={{
-          width: s,
-          height: s * 1.2,
-          boxShadow: `0 0 30px -5px ${character.glowColor}`,
-        }}
-        animate={{
-          y: state === "speaking" ? [0, -3, 0] : state === "celebrating" ? [0, -6, 0] : [0, -2, 0],
-        }}
+        style={{ width: s, height: s * 1.2, boxShadow: `0 0 30px -5px ${character.glowColor}` }}
+        animate={{ y: state === "speaking" ? [0, -3, 0] : state === "celebrating" ? [0, -6, 0] : [0, -2, 0] }}
         transition={{ duration: 2.5, repeat: Infinity }}
       >
         <Canvas
@@ -305,18 +243,9 @@ export default function Avatar3D({
           <ambientLight intensity={0.8} />
           <directionalLight position={[2, 3, 2]} intensity={1.2} />
           <directionalLight position={[-1, 1, -1]} intensity={0.4} />
-          <pointLight
-            position={[0, 0, 2]}
-            intensity={0.5}
-            color={character.glowColor}
-          />
+          <pointLight position={[0, 0, 2]} intensity={0.5} color={character.glowColor} />
           <Suspense fallback={null}>
-            <AvatarModel
-              url={avatarUrl}
-              state={state}
-              audioElement={audioElement}
-              glowColor={character.glowColor}
-            />
+            <AvatarModel url={avatarUrl} state={state} audioElement={audioElement} />
           </Suspense>
         </Canvas>
       </motion.div>
@@ -325,27 +254,16 @@ export default function Avatar3D({
       {state === "thinking" && (
         <div className="absolute -right-1 top-1 flex gap-1 z-20">
           {[0, 1, 2].map(i => (
-            <motion.div
-              key={i}
-              className="w-2 h-2 rounded-full bg-primary"
-              animate={{ y: [0, -6, 0], opacity: [0.4, 1, 0.4] }}
-              transition={{ duration: 0.6, repeat: Infinity, delay: i * 0.15 }}
-            />
+            <motion.div key={i} className="w-2 h-2 rounded-full bg-primary" animate={{ y: [0, -6, 0], opacity: [0.4, 1, 0.4] }} transition={{ duration: 0.6, repeat: Infinity, delay: i * 0.15 }} />
           ))}
         </div>
       )}
 
-      {/* Audio bars when speaking */}
+      {/* Audio bars */}
       {state === "speaking" && (
         <div className="flex gap-[2px] mt-1">
           {[0, 1, 2, 3, 4].map(i => (
-            <motion.div
-              key={i}
-              className="rounded-full"
-              style={{ width: 3, backgroundColor: character.glowColor }}
-              animate={{ height: [3, 8 + Math.random() * 8, 3] }}
-              transition={{ duration: 0.15, repeat: Infinity, delay: i * 0.04 }}
-            />
+            <motion.div key={i} className="rounded-full" style={{ width: 3, backgroundColor: character.glowColor }} animate={{ height: [3, 8 + Math.random() * 8, 3] }} transition={{ duration: 0.15, repeat: Infinity, delay: i * 0.04 }} />
           ))}
         </div>
       )}

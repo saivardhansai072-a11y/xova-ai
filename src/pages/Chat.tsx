@@ -1,6 +1,6 @@
-import { useState, useRef, useEffect, useCallback, useMemo } from "react";
+import { useState, useRef, useEffect, useCallback, useMemo, lazy, Suspense } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { Send, Volume2, VolumeX, Trash2, Users } from "lucide-react";
+import { Send, Volume2, VolumeX, Trash2, Users, Box, CircleDot } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import AnimatedAvatar from "@/components/AnimatedAvatar";
 import { streamChat, ChatMessage } from "@/lib/ai-stream";
@@ -9,6 +9,8 @@ import { getSelectedCharacterId, getCharacterById, AICharacter } from "@/lib/cha
 import { Link } from "react-router-dom";
 import { toast } from "sonner";
 import { useChatHistory } from "@/hooks/useChatHistory";
+
+const Avatar3D = lazy(() => import("@/components/Avatar3D"));
 
 type DisplayMessage = { id: string; role: "user" | "assistant"; content: string };
 
@@ -27,6 +29,7 @@ export default function ChatPage() {
   const [ttsEnabled, setTtsEnabled] = useState(true);
   const [avatarState, setAvatarState] = useState<"idle" | "speaking" | "listening" | "thinking">("idle");
   const [ttsAudio, setTtsAudio] = useState<HTMLAudioElement | null>(null);
+  const [use3D, setUse3D] = useState(() => localStorage.getItem("xova-3d-avatar") !== "false");
   const scrollRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -105,11 +108,23 @@ export default function ChatPage() {
     setMessages([{ id: "welcome", role: "assistant", content: character?.greeting || "Chat cleared! What would you like to learn?" }]);
   };
 
+  const renderAvatar = (state: "idle" | "speaking" | "listening" | "thinking", size: "sm" | "md" | "lg") => {
+    if (!character) return null;
+    if (use3D) {
+      return (
+        <Suspense fallback={<div className="w-10 h-10 rounded-full bg-primary/20 animate-pulse" />}>
+          <Avatar3D character={character} state={state} size={size} audioElement={ttsAudio} />
+        </Suspense>
+      );
+    }
+    return <AnimatedAvatar character={character} state={state} size={size} audioElement={ttsAudio} />;
+  };
+
   return (
     <div className="flex flex-col h-screen md:pt-14 pb-20 md:pb-0">
       <div className="flex items-center justify-between px-4 py-3 border-b border-border bg-card/50 backdrop-blur-md">
         <div className="flex items-center gap-3">
-          {character && (
+          {!use3D && character && (
             <AnimatedAvatar character={character} state={avatarState} size="sm" audioElement={ttsAudio} />
           )}
           <div>
@@ -120,6 +135,13 @@ export default function ChatPage() {
           </div>
         </div>
         <div className="flex items-center gap-1">
+          <button
+            onClick={() => { setUse3D(!use3D); localStorage.setItem("xova-3d-avatar", String(!use3D)); }}
+            className="p-2 rounded-lg hover:bg-secondary text-muted-foreground hover:text-foreground transition-colors"
+            title={use3D ? "Switch to 2D" : "Switch to 3D"}
+          >
+            {use3D ? <CircleDot className="w-4 h-4" /> : <Box className="w-4 h-4" />}
+          </button>
           <Link to="/characters" className="p-2 rounded-lg hover:bg-secondary text-muted-foreground hover:text-foreground transition-colors" title="Switch character">
             <Users className="w-4 h-4" />
           </Link>
@@ -134,6 +156,13 @@ export default function ChatPage() {
           </button>
         </div>
       </div>
+
+      {/* 3D Avatar display area */}
+      {use3D && character && (
+        <div className="flex justify-center py-3 border-b border-border bg-card/30">
+          {renderAvatar(avatarState, "sm")}
+        </div>
+      )}
 
       <div ref={scrollRef} className="flex-1 overflow-y-auto px-4 py-6 space-y-4">
         <AnimatePresence mode="popLayout">
