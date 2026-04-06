@@ -1,21 +1,8 @@
-import { Suspense, useRef, useEffect, useState, useCallback } from "react";
+import { useRef, useEffect, useState, useCallback, Component, ReactNode } from "react";
 import { Canvas, useFrame } from "@react-three/fiber";
-import { useGLTF } from "@react-three/drei";
 import * as THREE from "three";
 import { motion } from "framer-motion";
 import { AICharacter } from "@/lib/characters";
-
-// Working public Ready Player Me demo avatars with distinct appearances
-const RPM_AVATARS: Record<string, string> = {
-  goku: "https://models.readyplayer.me/64bfa15f0e72c63d7c3934a6.glb?morphTargets=ARKit&textureAtlas=1024",
-  naruto: "https://models.readyplayer.me/638df693d72bffc6fa17457c.glb?morphTargets=ARKit&textureAtlas=1024",
-  luffy: "https://models.readyplayer.me/632d65e99b4c6a4352a9b8db.glb?morphTargets=ARKit&textureAtlas=1024",
-  hinata: "https://models.readyplayer.me/639a1b51d72bffc6fa1e5d3a.glb?morphTargets=ARKit&textureAtlas=1024",
-  mikasa: "https://models.readyplayer.me/63f5c8a30e72c63d7c393e2b.glb?morphTargets=ARKit&textureAtlas=1024",
-  suzume: "https://models.readyplayer.me/63f5c9120e72c63d7c393f1c.glb?morphTargets=ARKit&textureAtlas=1024",
-};
-
-const DEFAULT_AVATAR = "https://models.readyplayer.me/638df693d72bffc6fa17457c.glb?morphTargets=ARKit&textureAtlas=1024";
 
 type AvatarState = "idle" | "speaking" | "listening" | "thinking" | "celebrating";
 
@@ -26,23 +13,33 @@ interface Avatar3DProps {
   audioElement?: HTMLAudioElement | null;
 }
 
-function AvatarModel({
-  url,
+// Character color mapping for procedural avatars
+const CHARACTER_COLORS: Record<string, { skin: string; hair: string; eyes: string; accent: string }> = {
+  goku: { skin: "#FFD5A6", hair: "#1A1A1A", eyes: "#2D1B0E", accent: "#FF8C00" },
+  naruto: { skin: "#FFD5A6", hair: "#FFB347", eyes: "#4A90D9", accent: "#FF6B35" },
+  luffy: { skin: "#FFD5A6", hair: "#1A1A1A", eyes: "#3D2B1F", accent: "#CC0000" },
+  hinata: { skin: "#FFE4D0", hair: "#191970", eyes: "#E8D5FF", accent: "#9370DB" },
+  mikasa: { skin: "#FFE4D0", hair: "#1A1A1A", eyes: "#4A4A4A", accent: "#8B0000" },
+  suzume: { skin: "#FFE4D0", hair: "#5D3A1A", eyes: "#8B4513", accent: "#FF69B4" },
+};
+
+const DEFAULT_COLORS = { skin: "#FFD5A6", hair: "#333333", eyes: "#2D1B0E", accent: "#4A90D9" };
+
+function ProceduralAvatar({
+  characterId,
   state,
   audioElement,
-  onError,
 }: {
-  url: string;
+  characterId: string;
   state: AvatarState;
   audioElement?: HTMLAudioElement | null;
-  onError: () => void;
 }) {
-  const gltf = useGLTF(url, undefined, undefined, (err) => {
-    console.warn("GLB load failed:", err);
-    onError();
-  });
-  const scene = gltf?.scene;
-  const meshRefs = useRef<THREE.SkinnedMesh[]>([]);
+  const groupRef = useRef<THREE.Group>(null);
+  const mouthRef = useRef<THREE.Mesh>(null);
+  const leftEyeRef = useRef<THREE.Mesh>(null);
+  const rightEyeRef = useRef<THREE.Mesh>(null);
+  const leftBrowRef = useRef<THREE.Mesh>(null);
+  const rightBrowRef = useRef<THREE.Mesh>(null);
   const analyserRef = useRef<AnalyserNode | null>(null);
   const audioCtxRef = useRef<AudioContext | null>(null);
   const sourceRef = useRef<MediaElementAudioSourceNode | null>(null);
@@ -50,159 +47,255 @@ function AvatarModel({
   const mouthOpenRef = useRef(0);
   const timeRef = useRef(0);
 
-  useEffect(() => {
-    if (!scene) return;
-    const meshes: THREE.SkinnedMesh[] = [];
-    scene.traverse((child) => {
-      if ((child as THREE.SkinnedMesh).isSkinnedMesh) {
-        const mesh = child as THREE.SkinnedMesh;
-        if (mesh.morphTargetDictionary && mesh.morphTargetInfluences) {
-          meshes.push(mesh);
-        }
-      }
-    });
-    meshRefs.current = meshes;
-  }, [scene]);
+  const colors = CHARACTER_COLORS[characterId] || DEFAULT_COLORS;
 
+  // Audio analysis
   const connectAudio = useCallback((audio: HTMLAudioElement) => {
     try {
-      if (!audioCtxRef.current) {
-        audioCtxRef.current = new AudioContext();
-      }
+      if (!audioCtxRef.current) audioCtxRef.current = new AudioContext();
       const ctx = audioCtxRef.current;
-
       if (lastAudioRef.current !== audio) {
-        if (sourceRef.current) {
-          try { sourceRef.current.disconnect(); } catch {}
-        }
+        if (sourceRef.current) try { sourceRef.current.disconnect(); } catch {}
         sourceRef.current = ctx.createMediaElementSource(audio);
         lastAudioRef.current = audio;
       }
-
       const analyser = ctx.createAnalyser();
       analyser.fftSize = 256;
       analyser.smoothingTimeConstant = 0.4;
-
       sourceRef.current!.connect(analyser);
       analyser.connect(ctx.destination);
       analyserRef.current = analyser;
-    } catch {
-      // Fallback to simulated mouth
-    }
+    } catch {}
   }, []);
 
   useEffect(() => {
-    if (!audioElement) {
-      analyserRef.current = null;
-      return;
-    }
+    if (!audioElement) { analyserRef.current = null; return; }
     connectAudio(audioElement);
     return () => {
-      if (analyserRef.current) {
-        try { analyserRef.current.disconnect(); } catch {}
-        analyserRef.current = null;
-      }
+      if (analyserRef.current) try { analyserRef.current.disconnect(); } catch {}
+      analyserRef.current = null;
     };
   }, [audioElement, connectAudio]);
 
-  const setMorphTarget = (name: string, value: number) => {
-    meshRefs.current.forEach((mesh) => {
-      const dict = mesh.morphTargetDictionary;
-      const influences = mesh.morphTargetInfluences;
-      if (dict && influences && dict[name] !== undefined) {
-        influences[dict[name]] = value;
-      }
-    });
-  };
-
-  const resetMorphTargets = () => {
-    meshRefs.current.forEach((mesh) => {
-      if (mesh.morphTargetInfluences) {
-        mesh.morphTargetInfluences.fill(0);
-      }
-    });
-  };
-
   useFrame((_, delta) => {
-    if (!scene) return;
+    if (!groupRef.current) return;
     timeRef.current += delta;
     const t = timeRef.current;
 
-    resetMorphTargets();
+    // Gentle sway
+    groupRef.current.rotation.y = Math.sin(t * 0.5) * 0.08;
+    groupRef.current.rotation.z = Math.sin(t * 0.3) * 0.02;
 
-    // Blink
-    const blinkCycle = t % 4;
-    if (blinkCycle > 3.8 && blinkCycle < 3.95) {
-      setMorphTarget("eyeBlinkLeft", 1);
-      setMorphTarget("eyeBlinkRight", 1);
-    }
+    // Breathing
+    const breathe = 1 + Math.sin(t * 1.5) * 0.01;
+    groupRef.current.scale.set(breathe, breathe, breathe);
 
-    // Audio level
+    // Audio-driven mouth
     if (analyserRef.current && state === "speaking") {
       const data = new Uint8Array(analyserRef.current.frequencyBinCount);
       analyserRef.current.getByteFrequencyData(data);
       let sum = 0;
       for (let i = 4; i < 30; i++) sum += data[i];
-      const audioLevel = Math.min(1, sum / (26 * 140));
-      mouthOpenRef.current = THREE.MathUtils.lerp(mouthOpenRef.current, audioLevel, 0.3);
+      const level = Math.min(1, sum / (26 * 140));
+      mouthOpenRef.current = THREE.MathUtils.lerp(mouthOpenRef.current, level, 0.3);
     } else if (state === "speaking") {
-      mouthOpenRef.current = 0.2 + Math.sin(t * 12) * 0.3 + Math.sin(t * 7) * 0.15;
+      mouthOpenRef.current = 0.3 + Math.sin(t * 12) * 0.3 + Math.sin(t * 7) * 0.15;
     } else {
-      mouthOpenRef.current = THREE.MathUtils.lerp(mouthOpenRef.current, 0, 0.1);
+      mouthOpenRef.current = THREE.MathUtils.lerp(mouthOpenRef.current, 0, 0.15);
     }
 
-    const m = mouthOpenRef.current;
-
-    if (m > 0.05) {
-      setMorphTarget("jawOpen", m * 0.6);
-      setMorphTarget("mouthOpen", m * 0.5);
-      const visemePhase = Math.floor(t * 8) % 4;
-      if (visemePhase === 0) setMorphTarget("mouthFunnel", m * 0.3);
-      else if (visemePhase === 1) { setMorphTarget("mouthSmileLeft", m * 0.2); setMorphTarget("mouthSmileRight", m * 0.2); }
-      else if (visemePhase === 2) setMorphTarget("mouthPucker", m * 0.3);
+    // Mouth animation
+    if (mouthRef.current) {
+      const m = Math.max(0, mouthOpenRef.current);
+      mouthRef.current.scale.y = 0.3 + m * 2;
+      mouthRef.current.scale.x = 1 + m * 0.3;
     }
 
-    if (state === "celebrating") {
-      setMorphTarget("mouthSmileLeft", 0.7);
-      setMorphTarget("mouthSmileRight", 0.7);
-    } else if (state === "thinking") {
-      setMorphTarget("browInnerUp", 0.4 + Math.sin(t * 2) * 0.1);
-      setMorphTarget("eyeLookUpLeft", 0.3);
-      setMorphTarget("eyeLookUpRight", 0.3);
-    } else if (state === "listening") {
-      setMorphTarget("browInnerUp", 0.2);
-      setMorphTarget("mouthSmileLeft", 0.15);
-      setMorphTarget("mouthSmileRight", 0.15);
+    // Blink
+    const blinkCycle = t % 3.5;
+    const blink = blinkCycle > 3.2 && blinkCycle < 3.35;
+    if (leftEyeRef.current) leftEyeRef.current.scale.y = blink ? 0.1 : 1;
+    if (rightEyeRef.current) rightEyeRef.current.scale.y = blink ? 0.1 : 1;
+
+    // Eyebrow expressions
+    if (leftBrowRef.current && rightBrowRef.current) {
+      if (state === "thinking") {
+        leftBrowRef.current.position.y = 0.55 + Math.sin(t * 2) * 0.03;
+        rightBrowRef.current.position.y = 0.55 + Math.sin(t * 2) * 0.03;
+        leftBrowRef.current.rotation.z = 0.15;
+        rightBrowRef.current.rotation.z = -0.15;
+      } else if (state === "listening") {
+        leftBrowRef.current.position.y = 0.58;
+        rightBrowRef.current.position.y = 0.58;
+        leftBrowRef.current.rotation.z = 0.05;
+        rightBrowRef.current.rotation.z = -0.05;
+      } else if (state === "celebrating") {
+        leftBrowRef.current.position.y = 0.6;
+        rightBrowRef.current.position.y = 0.6;
+        leftBrowRef.current.rotation.z = -0.1;
+        rightBrowRef.current.rotation.z = 0.1;
+      } else {
+        leftBrowRef.current.position.y = 0.52;
+        rightBrowRef.current.position.y = 0.52;
+        leftBrowRef.current.rotation.z = 0;
+        rightBrowRef.current.rotation.z = 0;
+      }
     }
 
-    scene.rotation.y = Math.sin(t * 0.5) * 0.05;
-    scene.rotation.x = Math.sin(t * 0.3) * 0.02;
+    // Thinking: look up
+    if (state === "thinking" && groupRef.current) {
+      groupRef.current.rotation.x = Math.sin(t * 0.8) * 0.05 - 0.05;
+    } else if (groupRef.current) {
+      groupRef.current.rotation.x = Math.sin(t * 0.3) * 0.02;
+    }
+
+    // Celebrating: bob
+    if (state === "celebrating" && groupRef.current) {
+      groupRef.current.position.y = Math.sin(t * 4) * 0.08;
+    } else if (groupRef.current) {
+      groupRef.current.position.y = 0;
+    }
   });
 
-  if (!scene) return null;
-
   return (
-    <primitive
-      object={scene}
-      scale={1.8}
-      position={[0, -1.6, 0]}
-      rotation={[0.05, 0, 0]}
-    />
+    <group ref={groupRef}>
+      {/* Head */}
+      <mesh position={[0, 0.15, 0]}>
+        <sphereGeometry args={[0.55, 32, 32]} />
+        <meshStandardMaterial color={colors.skin} roughness={0.6} />
+      </mesh>
+
+      {/* Hair - top */}
+      <mesh position={[0, 0.55, -0.05]}>
+        <sphereGeometry args={[0.48, 32, 32]} />
+        <meshStandardMaterial color={colors.hair} roughness={0.8} />
+      </mesh>
+
+      {/* Hair - back */}
+      <mesh position={[0, 0.2, -0.35]}>
+        <sphereGeometry args={[0.4, 32, 32]} />
+        <meshStandardMaterial color={colors.hair} roughness={0.8} />
+      </mesh>
+
+      {/* Character-specific hair accents */}
+      {characterId === "goku" && (
+        <>
+          <mesh position={[0, 0.95, -0.1]} rotation={[0.3, 0, 0]}>
+            <coneGeometry args={[0.15, 0.5, 8]} />
+            <meshStandardMaterial color={colors.hair} roughness={0.8} />
+          </mesh>
+          <mesh position={[0.2, 0.85, -0.05]} rotation={[0.2, 0, -0.3]}>
+            <coneGeometry args={[0.12, 0.4, 8]} />
+            <meshStandardMaterial color={colors.hair} roughness={0.8} />
+          </mesh>
+          <mesh position={[-0.2, 0.85, -0.05]} rotation={[0.2, 0, 0.3]}>
+            <coneGeometry args={[0.12, 0.4, 8]} />
+            <meshStandardMaterial color={colors.hair} roughness={0.8} />
+          </mesh>
+        </>
+      )}
+      {characterId === "naruto" && (
+        <>
+          {[-0.25, -0.12, 0, 0.12, 0.25].map((x, i) => (
+            <mesh key={i} position={[x, 0.8 + Math.abs(x) * 0.3, -0.05]} rotation={[0.2, 0, x * 0.5]}>
+              <coneGeometry args={[0.08, 0.3, 6]} />
+              <meshStandardMaterial color={colors.hair} roughness={0.8} />
+            </mesh>
+          ))}
+        </>
+      )}
+
+      {/* Eyes */}
+      <group position={[0, 0.2, 0.42]}>
+        {/* Left eye white */}
+        <mesh position={[-0.16, 0, 0]}>
+          <sphereGeometry args={[0.09, 16, 16]} />
+          <meshStandardMaterial color="#FFFFFF" roughness={0.3} />
+        </mesh>
+        {/* Left pupil */}
+        <mesh ref={leftEyeRef} position={[-0.16, 0, 0.05]}>
+          <sphereGeometry args={[0.055, 16, 16]} />
+          <meshStandardMaterial color={colors.eyes} roughness={0.2} />
+        </mesh>
+        {/* Left eye shine */}
+        <mesh position={[-0.13, 0.03, 0.09]}>
+          <sphereGeometry args={[0.02, 8, 8]} />
+          <meshStandardMaterial color="#FFFFFF" emissive="#FFFFFF" emissiveIntensity={0.5} />
+        </mesh>
+
+        {/* Right eye white */}
+        <mesh position={[0.16, 0, 0]}>
+          <sphereGeometry args={[0.09, 16, 16]} />
+          <meshStandardMaterial color="#FFFFFF" roughness={0.3} />
+        </mesh>
+        {/* Right pupil */}
+        <mesh ref={rightEyeRef} position={[0.16, 0, 0.05]}>
+          <sphereGeometry args={[0.055, 16, 16]} />
+          <meshStandardMaterial color={colors.eyes} roughness={0.2} />
+        </mesh>
+        {/* Right eye shine */}
+        <mesh position={[0.19, 0.03, 0.09]}>
+          <sphereGeometry args={[0.02, 8, 8]} />
+          <meshStandardMaterial color="#FFFFFF" emissive="#FFFFFF" emissiveIntensity={0.5} />
+        </mesh>
+      </group>
+
+      {/* Eyebrows */}
+      <mesh ref={leftBrowRef} position={[-0.16, 0.52, 0.43]}>
+        <boxGeometry args={[0.14, 0.025, 0.02]} />
+        <meshStandardMaterial color={colors.hair} roughness={0.8} />
+      </mesh>
+      <mesh ref={rightBrowRef} position={[0.16, 0.52, 0.43]}>
+        <boxGeometry args={[0.14, 0.025, 0.02]} />
+        <meshStandardMaterial color={colors.hair} roughness={0.8} />
+      </mesh>
+
+      {/* Nose */}
+      <mesh position={[0, 0.08, 0.52]}>
+        <sphereGeometry args={[0.04, 8, 8]} />
+        <meshStandardMaterial color={colors.skin} roughness={0.7} />
+      </mesh>
+
+      {/* Mouth */}
+      <mesh ref={mouthRef} position={[0, -0.08, 0.48]}>
+        <sphereGeometry args={[0.06, 16, 8]} />
+        <meshStandardMaterial color="#CC4444" roughness={0.5} />
+      </mesh>
+
+      {/* Neck */}
+      <mesh position={[0, -0.4, 0]}>
+        <cylinderGeometry args={[0.15, 0.18, 0.2, 16]} />
+        <meshStandardMaterial color={colors.skin} roughness={0.6} />
+      </mesh>
+
+      {/* Shoulders / Body top */}
+      <mesh position={[0, -0.65, 0]}>
+        <boxGeometry args={[0.9, 0.35, 0.45]} />
+        <meshStandardMaterial color={colors.accent} roughness={0.5} />
+      </mesh>
+
+      {/* Character-specific details */}
+      {characterId === "naruto" && (
+        <mesh position={[0, -0.02, 0.5]}>
+          <boxGeometry args={[0.35, 0.015, 0.01]} />
+          <meshStandardMaterial color="#333333" />
+        </mesh>
+      )}
+      {characterId === "mikasa" && (
+        <mesh position={[0, -0.55, 0.22]}>
+          <boxGeometry args={[0.85, 0.05, 0.02]} />
+          <meshStandardMaterial color="#8B0000" />
+        </mesh>
+      )}
+    </group>
   );
 }
 
-function LoadingFallback({ size }: { size: number }) {
-  return (
-    <div
-      className="flex items-center justify-center"
-      style={{ width: size, height: size * 1.2 }}
-    >
-      <div className="flex flex-col items-center gap-2">
-        <div className="w-12 h-12 rounded-full bg-primary/20 animate-pulse" />
-        <span className="text-[10px] text-muted-foreground">Loading 3D...</span>
-      </div>
-    </div>
-  );
+// Error boundary for Canvas crashes
+class CanvasErrorBoundary extends Component<{ children: ReactNode; fallback: ReactNode }, { hasError: boolean }> {
+  state = { hasError: false };
+  static getDerivedStateFromError() { return { hasError: true }; }
+  render() { return this.state.hasError ? this.props.fallback : this.props.children; }
 }
 
 export default function Avatar3D({
@@ -211,26 +304,11 @@ export default function Avatar3D({
   size = "md",
   audioElement,
 }: Avatar3DProps) {
-  const [loadError, setLoadError] = useState(false);
+  const [canvasError, setCanvasError] = useState(false);
   const sizes = { sm: 120, md: 200, lg: 280 };
   const s = sizes[size];
 
-  const avatarUrl = RPM_AVATARS[character.id] || DEFAULT_AVATAR;
-
-  // On error, fall back to null (parent should show 2D avatar)
-  if (loadError) {
-    return (
-      <div
-        className="flex items-center justify-center surface-card rounded-2xl"
-        style={{ width: s, height: s * 1.2 }}
-      >
-        <div className="text-center p-4">
-          <p className="text-xs text-muted-foreground mb-1">3D model unavailable</p>
-          <p className="text-[10px] text-muted-foreground">Using 2D avatar instead</p>
-        </div>
-      </div>
-    );
-  }
+  if (canvasError) return null;
 
   return (
     <div className="relative flex flex-col items-center" style={{ width: s + 40 }}>
@@ -265,27 +343,33 @@ export default function Avatar3D({
       {/* 3D Canvas */}
       <motion.div
         className="relative rounded-2xl overflow-hidden border-2 border-border/50"
-        style={{ width: s, height: s * 1.2, boxShadow: `0 0 30px -5px ${character.glowColor}` }}
+        style={{
+          width: s, height: s * 1.2,
+          boxShadow: `0 0 30px -5px ${character.glowColor}`,
+          background: `linear-gradient(135deg, hsl(var(--card)) 0%, hsl(var(--muted)) 100%)`,
+        }}
         animate={{ y: state === "speaking" ? [0, -3, 0] : state === "celebrating" ? [0, -6, 0] : [0, -2, 0] }}
         transition={{ duration: 2.5, repeat: Infinity }}
       >
-        <Canvas
-          camera={{ position: [0, 0.2, 1.5], fov: 30 }}
-          style={{ background: "transparent" }}
-        >
-          <ambientLight intensity={0.8} />
-          <directionalLight position={[2, 3, 2]} intensity={1.2} />
-          <directionalLight position={[-1, 1, -1]} intensity={0.4} />
-          <pointLight position={[0, 0, 2]} intensity={0.5} color={character.glowColor} />
-          <Suspense fallback={null}>
-            <AvatarModel
-              url={avatarUrl}
+        <CanvasErrorBoundary fallback={<div className="w-full h-full flex items-center justify-center text-xs text-muted-foreground">3D unavailable</div>}>
+          <Canvas
+            camera={{ position: [0, 0, 2.2], fov: 35 }}
+            style={{ background: "transparent" }}
+            onCreated={({ gl }) => {
+              gl.setClearColor(0x000000, 0);
+            }}
+          >
+            <ambientLight intensity={0.7} />
+            <directionalLight position={[2, 3, 3]} intensity={1} />
+            <directionalLight position={[-2, 1, -1]} intensity={0.3} />
+            <pointLight position={[0, 0, 3]} intensity={0.4} color={character.glowColor} />
+            <ProceduralAvatar
+              characterId={character.id}
               state={state}
               audioElement={audioElement}
-              onError={() => setLoadError(true)}
             />
-          </Suspense>
-        </Canvas>
+          </Canvas>
+        </CanvasErrorBoundary>
       </motion.div>
 
       {/* Thinking dots */}
