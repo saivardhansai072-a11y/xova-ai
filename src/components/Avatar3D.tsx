@@ -1,5 +1,5 @@
 import { useRef, useEffect, useState, useCallback, Component, ReactNode } from "react";
-import { Canvas, useFrame } from "@react-three/fiber";
+import { Canvas, useFrame, useLoader } from "@react-three/fiber";
 import * as THREE from "three";
 import { motion } from "framer-motion";
 import { AICharacter } from "@/lib/characters";
@@ -13,43 +13,28 @@ interface Avatar3DProps {
   audioElement?: HTMLAudioElement | null;
 }
 
-// Character color mapping for procedural avatars
-const CHARACTER_COLORS: Record<string, { skin: string; hair: string; eyes: string; accent: string }> = {
-  goku: { skin: "#FFD5A6", hair: "#1A1A1A", eyes: "#2D1B0E", accent: "#FF8C00" },
-  naruto: { skin: "#FFD5A6", hair: "#FFB347", eyes: "#4A90D9", accent: "#FF6B35" },
-  luffy: { skin: "#FFD5A6", hair: "#1A1A1A", eyes: "#3D2B1F", accent: "#CC0000" },
-  hinata: { skin: "#FFE4D0", hair: "#191970", eyes: "#E8D5FF", accent: "#9370DB" },
-  mikasa: { skin: "#FFE4D0", hair: "#1A1A1A", eyes: "#4A4A4A", accent: "#8B0000" },
-  suzume: { skin: "#FFE4D0", hair: "#5D3A1A", eyes: "#8B4513", accent: "#FF69B4" },
-};
-
-const DEFAULT_COLORS = { skin: "#FFD5A6", hair: "#333333", eyes: "#2D1B0E", accent: "#4A90D9" };
-
-function ProceduralAvatar({
-  characterId,
+function CharacterCard({
+  imageUrl,
   state,
   audioElement,
+  glowColor,
 }: {
-  characterId: string;
+  imageUrl: string;
   state: AvatarState;
   audioElement?: HTMLAudioElement | null;
+  glowColor: string;
 }) {
-  const groupRef = useRef<THREE.Group>(null);
-  const mouthRef = useRef<THREE.Mesh>(null);
-  const leftEyeRef = useRef<THREE.Mesh>(null);
-  const rightEyeRef = useRef<THREE.Mesh>(null);
-  const leftBrowRef = useRef<THREE.Mesh>(null);
-  const rightBrowRef = useRef<THREE.Mesh>(null);
+  const meshRef = useRef<THREE.Mesh>(null);
+  const glowRef = useRef<THREE.Mesh>(null);
   const analyserRef = useRef<AnalyserNode | null>(null);
   const audioCtxRef = useRef<AudioContext | null>(null);
   const sourceRef = useRef<MediaElementAudioSourceNode | null>(null);
   const lastAudioRef = useRef<HTMLAudioElement | null>(null);
-  const mouthOpenRef = useRef(0);
+  const intensityRef = useRef(0);
   const timeRef = useRef(0);
 
-  const colors = CHARACTER_COLORS[characterId] || DEFAULT_COLORS;
+  const texture = useLoader(THREE.TextureLoader, imageUrl);
 
-  // Audio analysis
   const connectAudio = useCallback((audio: HTMLAudioElement) => {
     try {
       if (!audioCtxRef.current) audioCtxRef.current = new AudioContext();
@@ -78,215 +63,92 @@ function ProceduralAvatar({
   }, [audioElement, connectAudio]);
 
   useFrame((_, delta) => {
-    if (!groupRef.current) return;
+    if (!meshRef.current) return;
     timeRef.current += delta;
     const t = timeRef.current;
 
-    // Gentle sway
-    groupRef.current.rotation.y = Math.sin(t * 0.5) * 0.08;
-    groupRef.current.rotation.z = Math.sin(t * 0.3) * 0.02;
-
-    // Breathing
-    const breathe = 1 + Math.sin(t * 1.5) * 0.01;
-    groupRef.current.scale.set(breathe, breathe, breathe);
-
-    // Audio-driven mouth
+    // Audio intensity
     if (analyserRef.current && state === "speaking") {
       const data = new Uint8Array(analyserRef.current.frequencyBinCount);
       analyserRef.current.getByteFrequencyData(data);
       let sum = 0;
       for (let i = 4; i < 30; i++) sum += data[i];
-      const level = Math.min(1, sum / (26 * 140));
-      mouthOpenRef.current = THREE.MathUtils.lerp(mouthOpenRef.current, level, 0.3);
+      intensityRef.current = THREE.MathUtils.lerp(intensityRef.current, Math.min(1, sum / (26 * 140)), 0.3);
     } else if (state === "speaking") {
-      mouthOpenRef.current = 0.3 + Math.sin(t * 12) * 0.3 + Math.sin(t * 7) * 0.15;
+      intensityRef.current = 0.3 + Math.sin(t * 10) * 0.2 + Math.sin(t * 7) * 0.1;
     } else {
-      mouthOpenRef.current = THREE.MathUtils.lerp(mouthOpenRef.current, 0, 0.15);
+      intensityRef.current = THREE.MathUtils.lerp(intensityRef.current, 0, 0.1);
     }
 
-    // Mouth animation
-    if (mouthRef.current) {
-      const m = Math.max(0, mouthOpenRef.current);
-      mouthRef.current.scale.y = 0.3 + m * 2;
-      mouthRef.current.scale.x = 1 + m * 0.3;
+    const intensity = intensityRef.current;
+
+    // Base gentle float
+    meshRef.current.position.y = Math.sin(t * 0.8) * 0.03;
+
+    // State-based animations
+    if (state === "speaking") {
+      meshRef.current.rotation.y = Math.sin(t * 1.5) * 0.06;
+      meshRef.current.rotation.z = Math.sin(t * 2) * 0.02;
+      meshRef.current.scale.setScalar(1 + intensity * 0.04);
+    } else if (state === "thinking") {
+      meshRef.current.rotation.y = Math.sin(t * 0.5) * 0.1;
+      meshRef.current.rotation.x = -0.05 + Math.sin(t * 0.8) * 0.03;
+      meshRef.current.scale.setScalar(1);
+    } else if (state === "listening") {
+      meshRef.current.rotation.y = Math.sin(t * 0.7) * 0.04;
+      meshRef.current.scale.set(1.02, 1.02, 1);
+    } else if (state === "celebrating") {
+      meshRef.current.position.y = Math.sin(t * 4) * 0.08;
+      meshRef.current.rotation.z = Math.sin(t * 3) * 0.05;
+      meshRef.current.scale.setScalar(1.03 + Math.sin(t * 5) * 0.02);
+    } else {
+      meshRef.current.rotation.y = Math.sin(t * 0.5) * 0.04;
+      meshRef.current.rotation.x = Math.sin(t * 0.3) * 0.01;
+      meshRef.current.scale.setScalar(1);
     }
 
-    // Blink
-    const blinkCycle = t % 3.5;
-    const blink = blinkCycle > 3.2 && blinkCycle < 3.35;
-    if (leftEyeRef.current) leftEyeRef.current.scale.y = blink ? 0.1 : 1;
-    if (rightEyeRef.current) rightEyeRef.current.scale.y = blink ? 0.1 : 1;
-
-    // Eyebrow expressions
-    if (leftBrowRef.current && rightBrowRef.current) {
-      if (state === "thinking") {
-        leftBrowRef.current.position.y = 0.55 + Math.sin(t * 2) * 0.03;
-        rightBrowRef.current.position.y = 0.55 + Math.sin(t * 2) * 0.03;
-        leftBrowRef.current.rotation.z = 0.15;
-        rightBrowRef.current.rotation.z = -0.15;
-      } else if (state === "listening") {
-        leftBrowRef.current.position.y = 0.58;
-        rightBrowRef.current.position.y = 0.58;
-        leftBrowRef.current.rotation.z = 0.05;
-        rightBrowRef.current.rotation.z = -0.05;
-      } else if (state === "celebrating") {
-        leftBrowRef.current.position.y = 0.6;
-        rightBrowRef.current.position.y = 0.6;
-        leftBrowRef.current.rotation.z = -0.1;
-        rightBrowRef.current.rotation.z = 0.1;
-      } else {
-        leftBrowRef.current.position.y = 0.52;
-        rightBrowRef.current.position.y = 0.52;
-        leftBrowRef.current.rotation.z = 0;
-        rightBrowRef.current.rotation.z = 0;
-      }
-    }
-
-    // Thinking: look up
-    if (state === "thinking" && groupRef.current) {
-      groupRef.current.rotation.x = Math.sin(t * 0.8) * 0.05 - 0.05;
-    } else if (groupRef.current) {
-      groupRef.current.rotation.x = Math.sin(t * 0.3) * 0.02;
-    }
-
-    // Celebrating: bob
-    if (state === "celebrating" && groupRef.current) {
-      groupRef.current.position.y = Math.sin(t * 4) * 0.08;
-    } else if (groupRef.current) {
-      groupRef.current.position.y = 0;
+    // Glow ring
+    if (glowRef.current) {
+      const baseGlow = state === "speaking" ? 0.6 + intensity * 0.4 :
+                       state === "listening" ? 0.4 + Math.sin(t * 2) * 0.2 :
+                       state === "celebrating" ? 0.5 + Math.sin(t * 4) * 0.3 :
+                       0.15 + Math.sin(t * 1) * 0.1;
+      (glowRef.current.material as THREE.MeshBasicMaterial).opacity = baseGlow;
+      const glowScale = 1.08 + (state === "speaking" ? intensity * 0.06 : Math.sin(t * 1.5) * 0.02);
+      glowRef.current.scale.set(glowScale, glowScale, 1);
     }
   });
 
+  // Parse glow color for Three.js
+  const threeGlowColor = new THREE.Color(glowColor.replace(/rgba?\(([^)]+)\)/, (_, vals) => {
+    const [r, g, b] = vals.split(",").map((v: string) => parseInt(v.trim()));
+    return `rgb(${r},${g},${b})`;
+  }));
+
   return (
-    <group ref={groupRef}>
-      {/* Head */}
-      <mesh position={[0, 0.15, 0]}>
-        <sphereGeometry args={[0.55, 32, 32]} />
-        <meshStandardMaterial color={colors.skin} roughness={0.6} />
+    <group>
+      {/* Glow ring behind character */}
+      <mesh ref={glowRef} position={[0, 0, -0.02]}>
+        <planeGeometry args={[1.6, 2.0]} />
+        <meshBasicMaterial
+          color={threeGlowColor}
+          transparent
+          opacity={0.2}
+          side={THREE.DoubleSide}
+        />
       </mesh>
 
-      {/* Hair - top */}
-      <mesh position={[0, 0.55, -0.05]}>
-        <sphereGeometry args={[0.48, 32, 32]} />
-        <meshStandardMaterial color={colors.hair} roughness={0.8} />
+      {/* Character image on a rounded card */}
+      <mesh ref={meshRef}>
+        <planeGeometry args={[1.5, 1.9]} />
+        <meshStandardMaterial
+          map={texture}
+          transparent
+          side={THREE.DoubleSide}
+          roughness={0.3}
+          metalness={0.1}
+        />
       </mesh>
-
-      {/* Hair - back */}
-      <mesh position={[0, 0.2, -0.35]}>
-        <sphereGeometry args={[0.4, 32, 32]} />
-        <meshStandardMaterial color={colors.hair} roughness={0.8} />
-      </mesh>
-
-      {/* Character-specific hair accents */}
-      {characterId === "goku" && (
-        <>
-          <mesh position={[0, 0.95, -0.1]} rotation={[0.3, 0, 0]}>
-            <coneGeometry args={[0.15, 0.5, 8]} />
-            <meshStandardMaterial color={colors.hair} roughness={0.8} />
-          </mesh>
-          <mesh position={[0.2, 0.85, -0.05]} rotation={[0.2, 0, -0.3]}>
-            <coneGeometry args={[0.12, 0.4, 8]} />
-            <meshStandardMaterial color={colors.hair} roughness={0.8} />
-          </mesh>
-          <mesh position={[-0.2, 0.85, -0.05]} rotation={[0.2, 0, 0.3]}>
-            <coneGeometry args={[0.12, 0.4, 8]} />
-            <meshStandardMaterial color={colors.hair} roughness={0.8} />
-          </mesh>
-        </>
-      )}
-      {characterId === "naruto" && (
-        <>
-          {[-0.25, -0.12, 0, 0.12, 0.25].map((x, i) => (
-            <mesh key={i} position={[x, 0.8 + Math.abs(x) * 0.3, -0.05]} rotation={[0.2, 0, x * 0.5]}>
-              <coneGeometry args={[0.08, 0.3, 6]} />
-              <meshStandardMaterial color={colors.hair} roughness={0.8} />
-            </mesh>
-          ))}
-        </>
-      )}
-
-      {/* Eyes */}
-      <group position={[0, 0.2, 0.42]}>
-        {/* Left eye white */}
-        <mesh position={[-0.16, 0, 0]}>
-          <sphereGeometry args={[0.09, 16, 16]} />
-          <meshStandardMaterial color="#FFFFFF" roughness={0.3} />
-        </mesh>
-        {/* Left pupil */}
-        <mesh ref={leftEyeRef} position={[-0.16, 0, 0.05]}>
-          <sphereGeometry args={[0.055, 16, 16]} />
-          <meshStandardMaterial color={colors.eyes} roughness={0.2} />
-        </mesh>
-        {/* Left eye shine */}
-        <mesh position={[-0.13, 0.03, 0.09]}>
-          <sphereGeometry args={[0.02, 8, 8]} />
-          <meshStandardMaterial color="#FFFFFF" emissive="#FFFFFF" emissiveIntensity={0.5} />
-        </mesh>
-
-        {/* Right eye white */}
-        <mesh position={[0.16, 0, 0]}>
-          <sphereGeometry args={[0.09, 16, 16]} />
-          <meshStandardMaterial color="#FFFFFF" roughness={0.3} />
-        </mesh>
-        {/* Right pupil */}
-        <mesh ref={rightEyeRef} position={[0.16, 0, 0.05]}>
-          <sphereGeometry args={[0.055, 16, 16]} />
-          <meshStandardMaterial color={colors.eyes} roughness={0.2} />
-        </mesh>
-        {/* Right eye shine */}
-        <mesh position={[0.19, 0.03, 0.09]}>
-          <sphereGeometry args={[0.02, 8, 8]} />
-          <meshStandardMaterial color="#FFFFFF" emissive="#FFFFFF" emissiveIntensity={0.5} />
-        </mesh>
-      </group>
-
-      {/* Eyebrows */}
-      <mesh ref={leftBrowRef} position={[-0.16, 0.52, 0.43]}>
-        <boxGeometry args={[0.14, 0.025, 0.02]} />
-        <meshStandardMaterial color={colors.hair} roughness={0.8} />
-      </mesh>
-      <mesh ref={rightBrowRef} position={[0.16, 0.52, 0.43]}>
-        <boxGeometry args={[0.14, 0.025, 0.02]} />
-        <meshStandardMaterial color={colors.hair} roughness={0.8} />
-      </mesh>
-
-      {/* Nose */}
-      <mesh position={[0, 0.08, 0.52]}>
-        <sphereGeometry args={[0.04, 8, 8]} />
-        <meshStandardMaterial color={colors.skin} roughness={0.7} />
-      </mesh>
-
-      {/* Mouth */}
-      <mesh ref={mouthRef} position={[0, -0.08, 0.48]}>
-        <sphereGeometry args={[0.06, 16, 8]} />
-        <meshStandardMaterial color="#CC4444" roughness={0.5} />
-      </mesh>
-
-      {/* Neck */}
-      <mesh position={[0, -0.4, 0]}>
-        <cylinderGeometry args={[0.15, 0.18, 0.2, 16]} />
-        <meshStandardMaterial color={colors.skin} roughness={0.6} />
-      </mesh>
-
-      {/* Shoulders / Body top */}
-      <mesh position={[0, -0.65, 0]}>
-        <boxGeometry args={[0.9, 0.35, 0.45]} />
-        <meshStandardMaterial color={colors.accent} roughness={0.5} />
-      </mesh>
-
-      {/* Character-specific details */}
-      {characterId === "naruto" && (
-        <mesh position={[0, -0.02, 0.5]}>
-          <boxGeometry args={[0.35, 0.015, 0.01]} />
-          <meshStandardMaterial color="#333333" />
-        </mesh>
-      )}
-      {characterId === "mikasa" && (
-        <mesh position={[0, -0.55, 0.22]}>
-          <boxGeometry args={[0.85, 0.05, 0.02]} />
-          <meshStandardMaterial color="#8B0000" />
-        </mesh>
-      )}
     </group>
   );
 }
@@ -304,15 +166,16 @@ export default function Avatar3D({
   size = "md",
   audioElement,
 }: Avatar3DProps) {
-  const [canvasError, setCanvasError] = useState(false);
+  const [hasError, setHasError] = useState(false);
   const sizes = { sm: 120, md: 200, lg: 280 };
   const s = sizes[size];
 
-  if (canvasError) return null;
+  // Need a valid image to render
+  if (!character.image || hasError) return null;
 
   return (
     <div className="relative flex flex-col items-center" style={{ width: s + 40 }}>
-      {/* Glow */}
+      {/* Glow effect */}
       <motion.div
         className="absolute rounded-full pointer-events-none"
         style={{
@@ -340,33 +203,36 @@ export default function Avatar3D({
         />
       ))}
 
-      {/* 3D Canvas */}
+      {/* 3D Canvas with character image */}
       <motion.div
         className="relative rounded-2xl overflow-hidden border-2 border-border/50"
         style={{
           width: s, height: s * 1.2,
           boxShadow: `0 0 30px -5px ${character.glowColor}`,
-          background: `linear-gradient(135deg, hsl(var(--card)) 0%, hsl(var(--muted)) 100%)`,
         }}
         animate={{ y: state === "speaking" ? [0, -3, 0] : state === "celebrating" ? [0, -6, 0] : [0, -2, 0] }}
         transition={{ duration: 2.5, repeat: Infinity }}
       >
-        <CanvasErrorBoundary fallback={<div className="w-full h-full flex items-center justify-center text-xs text-muted-foreground">3D unavailable</div>}>
+        <CanvasErrorBoundary fallback={
+          <div className="w-full h-full flex items-center justify-center">
+            <img src={character.image} alt={character.name} className="w-full h-full object-cover" />
+          </div>
+        }>
           <Canvas
-            camera={{ position: [0, 0, 2.2], fov: 35 }}
+            camera={{ position: [0, 0, 2.5], fov: 35 }}
             style={{ background: "transparent" }}
-            onCreated={({ gl }) => {
-              gl.setClearColor(0x000000, 0);
-            }}
+            onCreated={({ gl }) => gl.setClearColor(0x000000, 0)}
+            onError={() => setHasError(true)}
           >
-            <ambientLight intensity={0.7} />
-            <directionalLight position={[2, 3, 3]} intensity={1} />
+            <ambientLight intensity={0.9} />
+            <directionalLight position={[2, 3, 3]} intensity={0.8} />
             <directionalLight position={[-2, 1, -1]} intensity={0.3} />
-            <pointLight position={[0, 0, 3]} intensity={0.4} color={character.glowColor} />
-            <ProceduralAvatar
-              characterId={character.id}
+            <pointLight position={[0, 0, 3]} intensity={0.3} color={character.glowColor} />
+            <CharacterCard
+              imageUrl={character.image}
               state={state}
               audioElement={audioElement}
+              glowColor={character.glowColor}
             />
           </Canvas>
         </CanvasErrorBoundary>
