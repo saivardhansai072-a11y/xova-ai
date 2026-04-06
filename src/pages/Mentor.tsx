@@ -1,4 +1,5 @@
 import { useState, useMemo, useEffect, lazy, Suspense } from "react";
+import { MentorSkeleton } from "@/components/PageSkeleton";
 import { motion } from "framer-motion";
 import { Mic, MicOff, Volume2, VolumeX, Users, Box, CircleDot } from "lucide-react";
 import AnimatedAvatar from "@/components/AnimatedAvatar";

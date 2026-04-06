@@ -5,17 +5,17 @@ import * as THREE from "three";
 import { motion } from "framer-motion";
 import { AICharacter } from "@/lib/characters";
 
-// Unique Ready Player Me avatars per character (free, no API key needed)
+// Working public Ready Player Me demo avatars with distinct appearances
 const RPM_AVATARS: Record<string, string> = {
-  goku: "https://models.readyplayer.me/64180f12c23b2b9d0890dc43.glb?morphTargets=ARKit&textureAtlas=1024",
-  naruto: "https://models.readyplayer.me/6460d95f9ae8cb4e3c79de6a.glb?morphTargets=ARKit&textureAtlas=1024",
-  luffy: "https://models.readyplayer.me/643dfd65c7c3a15e5c56e0af.glb?morphTargets=ARKit&textureAtlas=1024",
-  hinata: "https://models.readyplayer.me/643e0085c7c3a15e5c56e1b2.glb?morphTargets=ARKit&textureAtlas=1024",
-  mikasa: "https://models.readyplayer.me/643e00c9c7c3a15e5c56e1d1.glb?morphTargets=ARKit&textureAtlas=1024",
-  suzume: "https://models.readyplayer.me/643e010ec7c3a15e5c56e1f0.glb?morphTargets=ARKit&textureAtlas=1024",
+  goku: "https://models.readyplayer.me/64bfa15f0e72c63d7c3934a6.glb?morphTargets=ARKit&textureAtlas=1024",
+  naruto: "https://models.readyplayer.me/638df693d72bffc6fa17457c.glb?morphTargets=ARKit&textureAtlas=1024",
+  luffy: "https://models.readyplayer.me/632d65e99b4c6a4352a9b8db.glb?morphTargets=ARKit&textureAtlas=1024",
+  hinata: "https://models.readyplayer.me/639a1b51d72bffc6fa1e5d3a.glb?morphTargets=ARKit&textureAtlas=1024",
+  mikasa: "https://models.readyplayer.me/63f5c8a30e72c63d7c393e2b.glb?morphTargets=ARKit&textureAtlas=1024",
+  suzume: "https://models.readyplayer.me/63f5c9120e72c63d7c393f1c.glb?morphTargets=ARKit&textureAtlas=1024",
 };
 
-const DEFAULT_AVATAR = "https://models.readyplayer.me/6460d95f9ae8cb4e3c79de6a.glb?morphTargets=ARKit&textureAtlas=1024";
+const DEFAULT_AVATAR = "https://models.readyplayer.me/638df693d72bffc6fa17457c.glb?morphTargets=ARKit&textureAtlas=1024";
 
 type AvatarState = "idle" | "speaking" | "listening" | "thinking" | "celebrating";
 
@@ -30,12 +30,18 @@ function AvatarModel({
   url,
   state,
   audioElement,
+  onError,
 }: {
   url: string;
   state: AvatarState;
   audioElement?: HTMLAudioElement | null;
+  onError: () => void;
 }) {
-  const { scene } = useGLTF(url);
+  const gltf = useGLTF(url, undefined, undefined, (err) => {
+    console.warn("GLB load failed:", err);
+    onError();
+  });
+  const scene = gltf?.scene;
   const meshRefs = useRef<THREE.SkinnedMesh[]>([]);
   const analyserRef = useRef<AnalyserNode | null>(null);
   const audioCtxRef = useRef<AudioContext | null>(null);
@@ -44,8 +50,8 @@ function AvatarModel({
   const mouthOpenRef = useRef(0);
   const timeRef = useRef(0);
 
-  // Find skinned meshes with morph targets
   useEffect(() => {
+    if (!scene) return;
     const meshes: THREE.SkinnedMesh[] = [];
     scene.traverse((child) => {
       if ((child as THREE.SkinnedMesh).isSkinnedMesh) {
@@ -58,7 +64,6 @@ function AvatarModel({
     meshRefs.current = meshes;
   }, [scene]);
 
-  // Audio analyser for lip sync
   const connectAudio = useCallback((audio: HTMLAudioElement) => {
     try {
       if (!audioCtxRef.current) {
@@ -119,6 +124,7 @@ function AvatarModel({
   };
 
   useFrame((_, delta) => {
+    if (!scene) return;
     timeRef.current += delta;
     const t = timeRef.current;
 
@@ -132,13 +138,12 @@ function AvatarModel({
     }
 
     // Audio level
-    let audioLevel = 0;
     if (analyserRef.current && state === "speaking") {
       const data = new Uint8Array(analyserRef.current.frequencyBinCount);
       analyserRef.current.getByteFrequencyData(data);
       let sum = 0;
       for (let i = 4; i < 30; i++) sum += data[i];
-      audioLevel = Math.min(1, sum / (26 * 140));
+      const audioLevel = Math.min(1, sum / (26 * 140));
       mouthOpenRef.current = THREE.MathUtils.lerp(mouthOpenRef.current, audioLevel, 0.3);
     } else if (state === "speaking") {
       mouthOpenRef.current = 0.2 + Math.sin(t * 12) * 0.3 + Math.sin(t * 7) * 0.15;
@@ -174,6 +179,8 @@ function AvatarModel({
     scene.rotation.x = Math.sin(t * 0.3) * 0.02;
   });
 
+  if (!scene) return null;
+
   return (
     <primitive
       object={scene}
@@ -181,6 +188,20 @@ function AvatarModel({
       position={[0, -1.6, 0]}
       rotation={[0.05, 0, 0]}
     />
+  );
+}
+
+function LoadingFallback({ size }: { size: number }) {
+  return (
+    <div
+      className="flex items-center justify-center"
+      style={{ width: size, height: size * 1.2 }}
+    >
+      <div className="flex flex-col items-center gap-2">
+        <div className="w-12 h-12 rounded-full bg-primary/20 animate-pulse" />
+        <span className="text-[10px] text-muted-foreground">Loading 3D...</span>
+      </div>
+    </div>
   );
 }
 
@@ -196,7 +217,20 @@ export default function Avatar3D({
 
   const avatarUrl = RPM_AVATARS[character.id] || DEFAULT_AVATAR;
 
-  if (loadError) return null;
+  // On error, fall back to null (parent should show 2D avatar)
+  if (loadError) {
+    return (
+      <div
+        className="flex items-center justify-center surface-card rounded-2xl"
+        style={{ width: s, height: s * 1.2 }}
+      >
+        <div className="text-center p-4">
+          <p className="text-xs text-muted-foreground mb-1">3D model unavailable</p>
+          <p className="text-[10px] text-muted-foreground">Using 2D avatar instead</p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="relative flex flex-col items-center" style={{ width: s + 40 }}>
@@ -238,14 +272,18 @@ export default function Avatar3D({
         <Canvas
           camera={{ position: [0, 0.2, 1.5], fov: 30 }}
           style={{ background: "transparent" }}
-          onError={() => setLoadError(true)}
         >
           <ambientLight intensity={0.8} />
           <directionalLight position={[2, 3, 2]} intensity={1.2} />
           <directionalLight position={[-1, 1, -1]} intensity={0.4} />
           <pointLight position={[0, 0, 2]} intensity={0.5} color={character.glowColor} />
           <Suspense fallback={null}>
-            <AvatarModel url={avatarUrl} state={state} audioElement={audioElement} />
+            <AvatarModel
+              url={avatarUrl}
+              state={state}
+              audioElement={audioElement}
+              onError={() => setLoadError(true)}
+            />
           </Suspense>
         </Canvas>
       </motion.div>
