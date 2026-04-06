@@ -1,4 +1,5 @@
 // Centralized TTS player with audio element tracking for lip-sync
+// Tries ElevenLabs first, falls back to browser SpeechSynthesis
 
 const TTS_URL = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/tts`;
 
@@ -45,6 +46,17 @@ function splitText(text: string, maxLen: number): string[] {
   return chunks;
 }
 
+function speakWithBrowser(text: string): Promise<void> {
+  return new Promise<void>(resolve => {
+    if (!("speechSynthesis" in window)) { resolve(); return; }
+    const utterance = new SpeechSynthesisUtterance(text);
+    utterance.rate = 0.95;
+    utterance.onend = () => resolve();
+    utterance.onerror = () => resolve();
+    window.speechSynthesis.speak(utterance);
+  });
+}
+
 export async function speakText(text: string, voiceId?: string): Promise<void> {
   stopTTS();
 
@@ -66,7 +78,16 @@ export async function speakText(text: string, voiceId?: string): Promise<void> {
 
       if (!resp.ok) throw new Error(`TTS ${resp.status}`);
 
+      // Check if we actually got audio back (not a JSON error)
+      const contentType = resp.headers.get("content-type") || "";
+      if (contentType.includes("application/json")) {
+        // Server returned an error JSON, fall back
+        throw new Error("TTS returned error JSON");
+      }
+
       const blob = await resp.blob();
+      if (blob.size < 100) throw new Error("TTS returned empty audio");
+      
       const url = URL.createObjectURL(blob);
       const audio = new Audio(url);
 
@@ -78,15 +99,8 @@ export async function speakText(text: string, voiceId?: string): Promise<void> {
         audio.play().catch(err => { URL.revokeObjectURL(url); notify(null); reject(err); });
       });
     } catch {
-      // Fallback to browser speech for this chunk
-      await new Promise<void>(resolve => {
-        if (!("speechSynthesis" in window)) { resolve(); return; }
-        const utterance = new SpeechSynthesisUtterance(chunk);
-        utterance.rate = 0.95;
-        utterance.onend = () => resolve();
-        utterance.onerror = () => resolve();
-        window.speechSynthesis.speak(utterance);
-      });
+      // Fallback to browser speech synthesis for this chunk
+      await speakWithBrowser(chunk);
     }
   }
 }
