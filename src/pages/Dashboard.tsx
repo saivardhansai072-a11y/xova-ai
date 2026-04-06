@@ -20,7 +20,7 @@ const iconMap: Record<string, React.ElementType> = {
 
 export default function DashboardPage() {
   const { user } = useAuth();
-  const { profile, updateProfile } = useProfile();
+  const { profile, loading, updateProfile } = useProfile();
   const { progress } = useQuizProgress();
   const { activity } = useActivityProgress();
 
