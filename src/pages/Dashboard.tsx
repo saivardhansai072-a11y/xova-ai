@@ -12,6 +12,7 @@ import { useQuizProgress } from "@/hooks/useQuizProgress";
 import { useProfile } from "@/hooks/useProfile";
 import { useActivityProgress } from "@/hooks/useActivityProgress";
 import { getDailyMissions, getMissionProgress } from "@/lib/daily-missions";
+import { DashboardSkeleton } from "@/components/PageSkeleton";
 
 const iconMap: Record<string, React.ElementType> = {
   Brain, Briefcase, MessageCircle, Compass, Rocket, Mic, Code,
@@ -70,6 +71,8 @@ export default function DashboardPage() {
   }));
 
   const completedCount = missions.filter(m => m.current >= m.target).length;
+
+  if (loading) return <DashboardSkeleton />;
 
   const quickAccess = [
     { icon: MessageCircle, label: "AI Chat", to: "/chat", color: "from-blue-500 to-cyan-400" },
