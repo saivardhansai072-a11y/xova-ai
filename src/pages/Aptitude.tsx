@@ -136,6 +136,9 @@ Make questions challenging but fair. correct is the 0-based index of the right a
     }
   };
 
+  // Auto-advance: go to next subtopic/topic, or generate AI level
+  const [currentLevel, setCurrentLevel] = useState(1);
+
   const autoAdvance = () => {
     if (selectedTopic) {
       const subIdx = selectedTopic.subtopics.indexOf(selectedSub!);
