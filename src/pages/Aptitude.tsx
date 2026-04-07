@@ -27,6 +27,7 @@ export default function AptitudePage() {
   const [search, setSearch] = useState("");
   const [activeQuestions, setActiveQuestions] = useState<AptitudeQuestion[]>([]);
   const [generatingAI, setGeneratingAI] = useState(false);
+  const [currentLevel, setCurrentLevel] = useState(1);
   const usedQuestionIds = useRef<Set<number>>(new Set());
 
   const q = activeQuestions[currentQ];
@@ -137,19 +138,20 @@ Make questions challenging but fair. correct is the 0-based index of the right a
   };
 
   const autoAdvance = () => {
-    if (selectedTopic) {
-      const subIdx = selectedTopic.subtopics.indexOf(selectedSub!);
+    if (selectedTopic && selectedSub) {
+      // First try next subtopic within same topic
+      const subIdx = selectedTopic.subtopics.indexOf(selectedSub);
       if (subIdx < selectedTopic.subtopics.length - 1) {
+        setCurrentLevel((l) => l + 1);
         startSubtopic(selectedTopic.subtopics[subIdx + 1]);
         return;
       }
-      const topicIdx = aptitudeTopics.indexOf(selectedTopic);
-      if (topicIdx < aptitudeTopics.length - 1) {
-        const nextTopic = aptitudeTopics[topicIdx + 1];
-        setSelectedTopic(nextTopic);
-        startSubtopic(nextTopic.subtopics[0]);
-        return;
-      }
+      // All hardcoded subtopics done — generate AI level automatically
+      const nextLevel = currentLevel + 1;
+      setCurrentLevel(nextLevel);
+      toast.info(`Level ${nextLevel} — Generating new questions...`);
+      generateAIQuestions(selectedTopic.name, `Level ${nextLevel}`);
+      return;
     }
     goBack();
   };
@@ -308,7 +310,7 @@ Make questions challenging but fair. correct is the 0-based index of the right a
       <div className="min-h-screen flex items-center justify-center px-4 pb-24 md:pt-16">
         <motion.div initial={{ opacity: 0, scale: 0.9 }} animate={{ opacity: 1, scale: 1 }} className="surface-card p-8 text-center max-w-md w-full">
           <Trophy className={`w-12 h-12 mx-auto ${pct >= 80 ? "text-yellow-400" : pct >= 60 ? "text-primary" : "text-muted-foreground"}`} />
-          <h2 className="text-2xl font-bold text-foreground mt-4">Set Complete!</h2>
+          <h2 className="text-2xl font-bold text-foreground mt-4">Level {currentLevel} Complete!</h2>
           <p className="text-4xl font-bold text-gradient-primary mt-2">{pct}%</p>
           <p className="text-muted-foreground mt-2">{score}/{activeQuestions.length} correct</p>
           <p className="text-sm text-muted-foreground mt-1">

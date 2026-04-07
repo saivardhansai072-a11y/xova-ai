@@ -73,3 +73,16 @@ export function trackMissionProgress(trackKey: string, amount = 1) {
   progress[trackKey] = (progress[trackKey] || 0) + amount;
   localStorage.setItem(key, JSON.stringify(progress));
 }
+
+// Clean up old mission data (keep only last 3 days)
+export function cleanupOldMissions() {
+  const today = getCycleKey();
+  for (let i = 0; i < localStorage.length; i++) {
+    const k = localStorage.key(i);
+    if (k && k.startsWith("xova-missions-") && !k.endsWith(today)) {
+      const dateStr = k.replace("xova-missions-", "");
+      const diff = Date.now() - new Date(dateStr).getTime();
+      if (diff > 3 * 86400000) localStorage.removeItem(k);
+    }
+  }
+}

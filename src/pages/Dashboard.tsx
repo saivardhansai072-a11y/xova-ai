@@ -55,18 +55,9 @@ export default function DashboardPage() {
   const dailyMissions = getDailyMissions();
   const missionProgress = getMissionProgress();
 
-  const activityMap: Record<string, number> = {
-    aptitude: totalQuestions,
-    interview: activity.interviewTurns,
-    chat: activity.chatTurns,
-    career: 0,
-    mentor: 0,
-    startup: 0,
-  };
-
   const missions = dailyMissions.map(m => ({
     ...m,
-    current: Math.min(missionProgress[m.trackKey] || activityMap[m.trackKey] || 0, m.target),
+    current: Math.min(missionProgress[m.trackKey] || 0, m.target),
     IconComponent: iconMap[m.icon] || Brain,
   }));
 
