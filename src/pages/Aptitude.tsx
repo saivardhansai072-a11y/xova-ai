@@ -27,6 +27,7 @@ export default function AptitudePage() {
   const [search, setSearch] = useState("");
   const [activeQuestions, setActiveQuestions] = useState<AptitudeQuestion[]>([]);
   const [generatingAI, setGeneratingAI] = useState(false);
+  const [currentLevel, setCurrentLevel] = useState(1);
   const usedQuestionIds = useRef<Set<number>>(new Set());
 
   const q = activeQuestions[currentQ];
@@ -136,23 +137,21 @@ Make questions challenging but fair. correct is the 0-based index of the right a
     }
   };
 
-  // Auto-advance: go to next subtopic/topic, or generate AI level
-  const [currentLevel, setCurrentLevel] = useState(1);
-
   const autoAdvance = () => {
-    if (selectedTopic) {
-      const subIdx = selectedTopic.subtopics.indexOf(selectedSub!);
+    if (selectedTopic && selectedSub) {
+      // First try next subtopic within same topic
+      const subIdx = selectedTopic.subtopics.indexOf(selectedSub);
       if (subIdx < selectedTopic.subtopics.length - 1) {
+        setCurrentLevel((l) => l + 1);
         startSubtopic(selectedTopic.subtopics[subIdx + 1]);
         return;
       }
-      const topicIdx = aptitudeTopics.indexOf(selectedTopic);
-      if (topicIdx < aptitudeTopics.length - 1) {
-        const nextTopic = aptitudeTopics[topicIdx + 1];
-        setSelectedTopic(nextTopic);
-        startSubtopic(nextTopic.subtopics[0]);
-        return;
-      }
+      // All hardcoded subtopics done — generate AI level automatically
+      const nextLevel = currentLevel + 1;
+      setCurrentLevel(nextLevel);
+      toast.info(`Level ${nextLevel} — Generating new questions...`);
+      generateAIQuestions(selectedTopic.name, `Level ${nextLevel}`);
+      return;
     }
     goBack();
   };
